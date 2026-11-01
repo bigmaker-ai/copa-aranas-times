@@ -594,10 +594,14 @@ function pedeSenha(depois, aoFechar) {
   $('f-senha').onsubmit = async (e) => {
     e.preventDefault();
     const senha = $('senha').value.normalize('NFC');
+    const botao = $('f-senha').querySelector('button');
+    botao.disabled = true;
+    botao.textContent = 'Entrando…';
+    $('senha-erro').hidden = true;
     let r;
     try { r = await fetch(`${API}/admin/ok`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ senha }) }).then((x) => x.json()); }
     catch { r = { ok: false, error: 'sem internet: não deu para conferir a senha' }; }
-    if (!r.ok) { $('senha-erro').textContent = r.error || 'senha errada'; $('senha-erro').hidden = false; return; }
+    if (!r.ok) { botao.disabled = false; botao.textContent = 'Entrar'; $('senha-erro').textContent = r.error || 'senha errada'; $('senha-erro').hidden = false; return; }
     senhaAdm = senha;
     try { sessionStorage.setItem('copa.adm', senha); } catch { /* só não lembra */ }
     depois();
