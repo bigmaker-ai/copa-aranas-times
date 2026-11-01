@@ -22,7 +22,7 @@ function toast(txt, bom) {
   clearTimeout(toast.h);
   toast.h = setTimeout(() => { t.hidden = true; }, 4500);
 }
-function abreSheet(html) { $('sheet-box').innerHTML = html; $('sheet').hidden = false; }
+function abreSheet(html) { $('toast').hidden = true; $('sheet-box').innerHTML = html; $('sheet').hidden = false; }
 function fechaSheet() { $('sheet').hidden = true; }
 $('sheet').addEventListener('click', (e) => { if (e.target === $('sheet')) fechaSheet(); });
 
@@ -99,7 +99,7 @@ const numValido = (v) => /^\d{1,3}$/.test(String(v).trim());
 function desenhaTime() {
   $('app').innerHTML = `
     <div class="topo">
-      <div class="time"><img src="${esc(T.logo)}" alt="" onerror="this.style.visibility='hidden'"><div><b>${esc(T.name)}</b><span class="muted">${esc(T.city || '')}</span></div></div>
+      <div class="time"><img src="${esc(T.logo)}" alt="" onerror="this.style.visibility='hidden'"><div><b>${esc(T.name)}</b><span class="muted">${esc(T.city || '')}</span></div><button class="eng" id="eng" aria-label="Mais opções">⚙️</button></div>
       <div class="abas">
         <button data-aba="jogadores" class="${aba === 'jogadores' ? 'on' : ''}">👥 Jogadores</button>
         <button data-aba="escalacao" class="${aba === 'escalacao' ? 'on' : ''}">📋 Escalação</button>
@@ -109,6 +109,7 @@ function desenhaTime() {
     <div class="rodape"><button class="grande" id="enviar">✅ Salvar e enviar por WhatsApp</button></div>`;
   document.querySelectorAll('[data-aba]').forEach((b) => { b.onclick = () => { aba = b.dataset.aba; desenhaTime(); scrollTo(0, 0); }; });
   $('enviar').onclick = preparaEnvio;
+  $('eng').onclick = abreEngrenagem;
   if (aba === 'jogadores') desenhaJogadores(); else desenhaEscalacao();
 }
 
@@ -119,13 +120,15 @@ function cardJogador(j, rep) {
   const ruim = !numValido(n) || rep[Number(n)] > 1;
   const f = fotoDe(j);
   return `<div class="jog ${mexido(j) ? 'mudou' : ''} ${ruim || !j.nome.trim() ? 'erro' : ''}" data-card="${esc(j.id)}">
-    <button class="foto" data-foto="${esc(j.id)}" aria-label="Trocar foto">${f ? `<img src="${esc(f)}" alt="" loading="lazy">` : '📷'}<small>foto</small></button>
     <div>
+      <button class="foto" data-foto="${esc(j.id)}" aria-label="Trocar foto">${f ? `<img src="${esc(f)}" alt="" loading="lazy">` : '📷'}<small>foto</small></button>
       <div class="linha">
         <input class="num ${ruim ? 'ruim' : ''}" data-num="${esc(j.id)}" value="${esc(j.num)}" inputmode="numeric" maxlength="3" placeholder="Nº" aria-label="Número">
-        <input data-nome="${esc(j.id)}" value="${esc(j.nome)}" maxlength="40" placeholder="Nome" aria-label="Nome" autocapitalize="characters">
         <button class="lixo" data-tira="${esc(j.id)}" aria-label="Tirar do time">🗑</button>
       </div>
+    </div>
+    <div>
+      <textarea data-nome="${esc(j.id)}" rows="1" maxlength="40" placeholder="Nome do jogador" aria-label="Nome">${esc(j.nome)}</textarea>
       <div class="pos">${POSICOES.map(([v, t]) => `<button data-pos="${esc(j.id)}" data-v="${v}" class="${j.pos === v ? 'on' : ''}">${t}</button>`).join('')}</div>
     </div>
   </div>`;
@@ -147,7 +150,10 @@ function desenhaJogadores() {
   };
   const c = $('corpo');
   c.querySelectorAll('[data-num]').forEach((i) => { i.oninput = () => { const j = porId(i.dataset.num); j.num = i.value.replace(/\D/g, ''); i.value = j.num; guarda(); marcaErros(); }; });
-  c.querySelectorAll('[data-nome]').forEach((i) => { i.oninput = () => { porId(i.dataset.nome).nome = i.value; guarda(); marcaErros(); }; });
+  c.querySelectorAll('[data-nome]').forEach((i) => {
+    ajustaAltura(i);
+    i.oninput = () => { i.value = i.value.replace(/\s*\n\s*/g, ' '); porId(i.dataset.nome).nome = i.value; ajustaAltura(i); guarda(); marcaErros(); };
+  });
   c.querySelectorAll('[data-pos]').forEach((b) => { b.onclick = () => {
     const j = porId(b.dataset.pos);
     j.pos = b.dataset.v;
@@ -163,6 +169,10 @@ function desenhaJogadores() {
   }; });
   c.querySelectorAll('[data-desfaz]').forEach((b) => { b.onclick = () => { porId(b.dataset.desfaz).x = false; guarda(); desenhaJogadores(); }; });
 }
+/* o nome aparece inteiro, em quantas linhas precisar */
+function ajustaAltura(t) { t.style.height = 'auto'; t.style.height = `${t.scrollHeight + 2}px`; }
+addEventListener('resize', () => document.querySelectorAll('[data-nome]').forEach(ajustaAltura));
+
 /* sem redesenhar a lista enquanto digita (o teclado do celular fecharia) */
 function marcaErros() {
   const rep = repetidos();
@@ -305,50 +315,127 @@ function linhasResumo(p) {
   if (p.esc) l.push(`📋 Escalação ${p.esc.form}: ${p.esc.tit.filter((n) => n != null).length} de 11`);
   return l;
 }
-async function preparaEnvio() {
-  if (!confere()) return;
-  const p = montaPacote();
-  if (!p.jogadores.length && !p.esc) return toast('Você ainda não alterou nada.');
-  const d = await fecha(p);
-  const n = p.esc ? p.esc.tit.filter((x) => x != null).length : 11;
-  const link = `${linkDoTime(T.slug)}#d=${d}`;
-  const cabe = link.length <= LIMITE_LINK;
-  abreSheet(`<h3>Tudo pronto</h3>
-    <div class="resumo">${linhasResumo(p).map((l) => `<div>${esc(l)}</div>`).join('')}</div>
-    ${n < 11 ? `<p class="aviso">⚠️ A escalação está com ${n} de 11: ela só entra na transmissão quando tiver os 11.</p>` : ''}
-    ${cabe ? '' : '<p class="aviso">Com essas fotos vai como um arquivo: é só mandar o arquivo no WhatsApp.</p>'}
-    <button class="grande" id="e-zap">📲 Enviar por WhatsApp</button>
-    ${cabe ? '<button class="grande sec" id="e-copia">🔗 Copiar link</button>' : ''}
-    <button class="grande sec" id="e-tv">📡 Estou no Wi-Fi da transmissão</button>`);
-  $('sheet-box').dataset.link = link;
-  $('e-zap').onclick = () => (cabe ? mandaLink(link) : mandaArquivo(d));
-  if (cabe) $('e-copia').onclick = () => copia(link);
-  $('e-tv').onclick = () => telaTransmissao(d);
+/* ── o que vai junto: imagem da escalação e planilha ── */
+const nomeArquivo = (t) => t.replace(/[\\/:*?"<>|]/g, '').trim();
+const POS_NOME = { GK: 'Goleiro', DF: 'Defesa', MF: 'Meio-campo', FW: 'Ataque' };
+function abasDaPlanilha() {
+  const situacao = (j) => (j.x ? 'Saiu do time' : E.tit.includes(j.id) ? 'Titular' : E.res.includes(j.id) ? 'Reserva' : '');
+  const alteracao = (j) => (j.x ? 'Tirado' : j.o == null ? 'Novo' : [mudouCampos(j) ? 'Corrigido' : '', j.f ? 'Foto nova' : ''].filter(Boolean).join(' + '));
+  const celNum = (j) => (numValido(j.num) ? Number(j.num) : j.num);
+  const lista = jogs.slice().sort((a, b) => Number(a.x) - Number(b.x) || Number(a.num) - Number(b.num));
+  const abas = [{
+    nome: 'Elenco', larguras: [7, 42, 14, 14, 20], titulos: [0],
+    linhas: [['Nº', 'Nome', 'Posição', 'Situação', 'Alteração'], ...lista.map((j) => [celNum(j), j.nome.trim().toUpperCase(), POS_NOME[j.pos] || '', situacao(j), alteracao(j)])],
+  }];
+  if (E.tit.some(Boolean)) {
+    const lin = (j, f) => [f, celNum(j), j.nome.trim().toUpperCase(), POS_NOME[j.pos] || ''];
+    const titulares = E.tit.filter(Boolean).map(porId), reservas = E.res.map(porId);
+    abas.unshift({
+      nome: 'Escalação', larguras: [12, 7, 42, 14], titulos: [3],
+      linhas: [['Time', T.name], ['Formação', E.form], ['Técnico', E.tec.trim()], ['Função', 'Nº', 'Nome', 'Posição'], ...titulares.map((j) => lin(j, 'Titular')), ...reservas.map((j) => lin(j, 'Reserva'))],
+    });
+  }
+  return abas;
+}
+async function montaAnexos() {
+  const lista = [];
+  if (E.tit.some(Boolean)) {
+    const png = await gerarImagemEscalacao({
+      time: T.name, logo: T.logo, formacao: E.form, tecnico: E.tec.trim(), slots: lugares(E.form),
+      titulares: E.tit.map((id) => { const j = id && porId(id); return j ? { number: j.num, nome: curto(j), photo: fotoDe(j) } : null; }),
+      reservas: E.res.map(porId).map((j) => ({ number: j.num, nome: curto(j) })),
+    });
+    lista.push(new File([png], nomeArquivo(`Escalação ${T.name}.png`), { type: 'image/png' }));
+  }
+  const abas = abasDaPlanilha();
+  const xlsx = new File([gerarXlsx(abas)], nomeArquivo(`Time ${T.name}.xlsx`), { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const csv = new File([gerarCsv(abas.find((a) => a.nome === 'Elenco'))], nomeArquivo(`Time ${T.name}.csv`), { type: 'text/csv' });
+  return { lista, xlsx, csv };
+}
+function baixa(file) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(file);
+  a.download = file.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+/* alguns celulares não deixam compartilhar .xlsx: aí vai o .csv, que o Excel também abre */
+async function mandaArquivos(arqs) {
+  const comXlsx = [...arqs.lista, arqs.xlsx, ...(arqs.extra || [])];
+  const comCsv = [...arqs.lista, arqs.csv, ...(arqs.extra || [])];
+  const pode = navigator.canShare?.({ files: comXlsx }) ? comXlsx : navigator.canShare?.({ files: comCsv }) ? comCsv : null;
+  if (pode) {
+    try { await navigator.share({ files: pode }); return true; } catch (e) { if (e?.name === 'AbortError') return false; }
+  }
+  for (const f of comXlsx) { baixa(f); await new Promise((r) => setTimeout(r, 400)); }
+  toast('Arquivos baixados: agora mande no WhatsApp.', true);
+  return true;
 }
 async function mandaLink(link) {
   const texto = `Time ${T.name}: alterações para a transmissão da Copa Aranãs. Toque no link para abrir:\n${link}`;
   if (navigator.share) {
-    try { await navigator.share({ text: texto }); return; } catch (e) { if (e?.name === 'AbortError') return; }
+    try { await navigator.share({ text: texto }); return true; } catch (e) { if (e?.name === 'AbortError') return false; }
   }
   // o wa.me não aguenta texto muito longo: aí copia
-  if (texto.length < 6000) { window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank'); return; }
-  copia(link);
+  if (texto.length < 6000) { window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank'); return true; }
+  await copia(link);
+  return true;
 }
-async function mandaArquivo(d) {
-  const nome = `Time ${T.name} (abrir no site).txt`;
-  const corpo = `Alterações do time ${T.name} para a transmissão da Copa Aranãs.\nAbra ${baseUrl()} e toque em "Abrir arquivo recebido".\n\n#d=${d}\n`;
-  const file = new File([corpo], nome, { type: 'text/plain' });
-  if (navigator.canShare?.({ files: [file] })) {
-    try { await navigator.share({ files: [file] }); return; } catch (e) { if (e?.name === 'AbortError') return; }
+const arquivoDosDados = (d) => new File([`Alterações do time ${T.name} para a transmissão da Copa Aranãs.\nAbra ${baseUrl()} e toque em "Abrir arquivo recebido".\n\n#d=${d}\n`], nomeArquivo(`Time ${T.name} (abrir no site).txt`), { type: 'text/plain' });
+
+async function preparaEnvio() {
+  if (!confere()) return;
+  const p = montaPacote();
+  if (!p.jogadores.length && !p.esc) return toast('Você ainda não alterou nada.');
+  abreSheet('<h3>Preparando…</h3>');
+  const d = await fecha(p);
+  const arqs = await montaAnexos();
+  const n = p.esc ? p.esc.tit.filter((x) => x != null).length : 11;
+  const link = `${linkDoTime(T.slug)}#d=${d}`;
+  const cabe = link.length <= LIMITE_LINK;
+  const oQue = arqs.lista.length ? 'imagem e planilha' : 'planilha';
+  const topo = `<h3>Tudo pronto</h3>
+    <div class="resumo">${linhasResumo(p).map((l) => `<div>${esc(l)}</div>`).join('')}</div>
+    ${n < 11 ? `<p class="aviso">⚠️ A escalação está com ${n} de 11: ela só entra na transmissão quando tiver os 11.</p>` : ''}`;
+  if (cabe) {
+    // o WhatsApp pode descartar o texto quando vai junto com arquivos: por isso o link vai primeiro, sozinho
+    abreSheet(`${topo}<button class="grande" id="e-link">📲 1 de 2 · Enviar alterações</button>
+      <button class="grande sec" id="e-arq">🖼 2 de 2 · Enviar ${oQue}</button>`);
+    $('sheet-box').dataset.link = link;
+    $('e-link').onclick = async () => {
+      if (!(await mandaLink(link))) return;
+      $('e-link').className = 'grande sec';
+      $('e-link').textContent = '✔ Alterações enviadas';
+      $('e-arq').className = 'grande';
+    };
+    $('e-arq').onclick = async () => { if (await mandaArquivos(arqs)) { $('e-arq').className = 'grande sec'; $('e-arq').textContent = `✔ ${oQue[0].toUpperCase()}${oQue.slice(1)} enviada${arqs.lista.length ? 's' : ''}`; } };
+  } else {
+    // com muitas fotos não cabe em link: as alterações vão num arquivo, junto com o resto
+    arqs.extra = [arquivoDosDados(d)];
+    abreSheet(`${topo}<button class="grande" id="e-arq">📲 Enviar por WhatsApp</button>`);
+    $('sheet-box').dataset.link = link;
+    $('e-arq').onclick = () => mandaArquivos(arqs);
   }
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(file);
-  a.download = nome;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  toast('Arquivo baixado: agora mande ele no WhatsApp.', true);
 }
+
+/* ⚙️ o que não é o dia a dia do treinador: copiar o link e enviar direto pro PC da transmissão */
+async function abreEngrenagem() {
+  if (!confere()) return;
+  const p = montaPacote();
+  if (!p.jogadores.length && !p.esc) return toast('Você ainda não alterou nada.');
+  const d = await fecha(p);
+  const link = `${linkDoTime(T.slug)}#d=${d}`;
+  const f = formPc(d);
+  abreSheet(`<h3>Mais opções</h3>
+    <p class="muted" style="margin:0 0 12px">No mesmo Wi-Fi da transmissão, com o app ligado, envie direto para o sistema:</p>
+    ${f.html}
+    <div style="height:14px"></div>
+    <button class="grande sec" id="e-copia">🔗 Copiar link</button>`);
+  f.liga();
+  $('e-copia').onclick = () => (link.length <= LIMITE_LINK ? copia(link) : toast('Com essas fotos o link fica grande demais: use o botão verde, que envia como arquivo.'));
+}
+
 async function copia(txt) {
   try { await navigator.clipboard.writeText(txt); toast('Link copiado: cole no WhatsApp.', true); }
   catch { prompt('Copie o link:', txt); }
@@ -357,7 +444,7 @@ async function copia(txt) {
 /* ── 📡 no Wi-Fi da transmissão: abre a página do próprio PC, levando tudo no endereço ── */
 function vaiProPc(pc, d) { grava('copa.pc', pc); location.href = `${pc}/receber-time#d=${d}`; }
 function formPc(d) {
-  return { html: `<button class="grande" id="tv-vai">📡 Enviar para a transmissão</button>
+  return { html: `<button class="grande" id="tv-vai">📡 Enviar dados para a transmissão</button>
     <p class="muted" style="margin:14px 0 0;font-size:14px">Não abriu? Digite o número do PC (ele aparece no endereço do app):</p>
     <div class="pc"><input id="tv-ip" inputmode="decimal" placeholder="ex.: 192.168.0.10" value="${esc((ler('copa.pc') || '').match(/^http:\/\/([\d.]+):4000/)?.[1] || '')}"><button id="tv-ip-vai">Abrir</button></div>`,
     liga() {
@@ -369,12 +456,6 @@ function formPc(d) {
       };
     } };
 }
-function telaTransmissao(d) {
-  const f = formPc(d);
-  abreSheet(`<h3>Enviar para a transmissão</h3><p class="muted" style="margin:0 0 12px">Precisa estar no mesmo Wi-Fi do PC da transmissão, com o app ligado.</p>${f.html}`);
-  f.liga();
-}
-
 /* ═══ link recebido: o operador só confere e manda pro PC ═══ */
 async function telaRecebido(d) {
   let p;
