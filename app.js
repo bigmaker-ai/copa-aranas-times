@@ -88,6 +88,7 @@ function guarda() {
     else if (mexido(j) || j.rest) ed[j.o] = { num: j.num, nome: j.nome, pos: j.pos, f: j.f, x: j.x, rest: j.rest };
   }
   if (!grava(chave, { ed, novos, esc: E })) toast('Sem espaço para guardar neste celular: envie logo o que já fez.');
+  agendaPreparo();
 }
 const porId = (id) => jogs.find((j) => j.id === id);
 const fotoDe = (j) => j.f || j.foto;
@@ -111,7 +112,7 @@ function desenhaTime() {
     </div>
     <div id="corpo"></div>
     <div class="rodape"><button class="grande" id="enviar">✅ Enviar ${aba === 'jogadores' ? 'jogadores' : 'escalação'} por WhatsApp</button></div>`;
-  document.querySelectorAll('[data-aba]').forEach((b) => { b.onclick = () => { aba = b.dataset.aba; desenhaTime(); scrollTo(0, 0); }; });
+  document.querySelectorAll('[data-aba]').forEach((b) => { b.onclick = () => { aba = b.dataset.aba; desenhaTime(); scrollTo(0, 0); agendaPreparo(); }; });
   $('enviar').onclick = preparaEnvio;
   $('eng').onclick = abreEngrenagem;
   if (aba === 'jogadores') desenhaJogadores(); else desenhaEscalacao();
@@ -411,13 +412,23 @@ async function mandaLink(link) {
   await copia(link);
 }
 
-async function preparaEnvio() {
-  if (!confere()) return;
-  const modo = aba;
-  if (modo === 'escalacao' && !E.tit.some(Boolean)) return toast('Monte a escalação primeiro: toque nos lugares do campo.');
-  if (modo === 'jogadores' && !jogs.some((j) => !j.x)) return toast('Adicione os jogadores primeiro.');
+/* tudo pronto ANTES do toque: o navegador (principalmente o iPhone) só abre o compartilhamento se ele
+ * vier direto do toque. Sem isso, teria que pedir um segundo toque. */
+let pronto = null, vezPreparo = 0, timerPreparo = null;
+const podeEnviar = (modo) => !temErro() && (modo === 'escalacao' ? E.tit.some(Boolean) : jogs.some((j) => !j.x));
+function agendaPreparo() {
+  pronto = null;
+  vezPreparo++;
+  clearTimeout(timerPreparo);
+  timerPreparo = setTimeout(async () => {
+    const vez = vezPreparo, modo = aba;
+    if (!podeEnviar(modo)) return;
+    const e = await montaEnvio(modo);
+    if (vez === vezPreparo) pronto = e;
+  }, 1200);
+}
+async function montaEnvio(modo) {
   const p = montaPacote(modo);
-  abreSheet('<h3>Preparando…</h3>');
   const d = await fecha(p);
   const link = `${linkDoTime(T.slug)}#d=${d}`;
   const cabe = link.length <= LIMITE_LINK;
@@ -426,13 +437,26 @@ async function preparaEnvio() {
   // com muitas fotos não cabe em link: as alterações vão num arquivo, junto com o resto
   if (arqs && !cabe) arqs.extra = [arquivoDosDados(d)];
   const assunto = `Time ${T.name}: ${modo === 'jogadores' ? 'lista de jogadores' : 'escalação'} para a transmissão da Copa Aranãs.`;
-  const texto = cabe ? `${assunto} Toque no link para abrir:\n${link}` : assunto;
   const n = p.esc ? p.esc.tit.filter((x) => x != null).length : 11;
-  const topo = `<div class="resumo">${linhasResumo(p).map((l) => `<div>${esc(l)}</div>`).join('')}</div>
-    ${n < 11 ? `<p class="aviso">⚠️ A escalação está com ${n} de 11: ela só entra na transmissão quando tiver os 11.</p>` : ''}`;
+  return { modo, d, link, cabe, arqs, n, texto: cabe ? `${assunto} Toque no link para abrir:\n${link}` : assunto };
+}
+function preparaEnvio() {
+  if (!confere()) return;
+  const modo = aba;
+  if (modo === 'escalacao' && !E.tit.some(Boolean)) return toast('Monte a escalação primeiro: toque nos lugares do campo.');
+  if (modo === 'jogadores' && !jogs.some((j) => !j.x)) return toast('Adicione os jogadores primeiro.');
+  if (pronto?.modo === modo) return enviaPronto(pronto);
+  // tocou antes de terminar de preparar
+  abreSheet('<h3>Preparando…</h3>');
+  vezPreparo++;
+  clearTimeout(timerPreparo);
+  montaEnvio(modo).then((e) => { pronto = e; enviaPronto(e); });
+}
+function enviaPronto({ d, link, cabe, arqs, n, texto }) {
+  $('sheet-box').dataset.link = link;
   let pediuToque = false;
   const pedeToque = () => {
-    abreSheet(`<h3>Tudo pronto</h3>${topo}<button class="grande" id="e-zap">📲 Enviar por WhatsApp</button>`);
+    abreSheet('<h3>Tudo pronto</h3><button class="grande" id="e-zap">📲 Enviar por WhatsApp</button>');
     $('sheet-box').dataset.link = link;
     $('e-zap').onclick = envia;
   };
@@ -440,7 +464,7 @@ async function preparaEnvio() {
   const manual = (motivo) => {
     const wa = `https://wa.me/?text=${encodeURIComponent(texto)}`;
     const linkCabe = cabe && wa.length < 7000;
-    abreSheet(`<h3>Enviar pelo WhatsApp</h3>${topo}
+    abreSheet(`<h3>Enviar pelo WhatsApp</h3>
       <a class="grande" id="m-zap" href="${esc(linkCabe ? wa : 'https://wa.me/')}" target="_blank" rel="noopener">📲 Abrir o WhatsApp${linkCabe ? ' com o link' : ''}</a>
       ${cabe && !linkCabe ? '<button class="grande sec" id="m-copia">🔗 Copiar o link</button>' : ''}
       ${arqs ? '<button class="grande sec" id="m-baixa">⬇️ Baixar imagem e planilha para anexar</button>' : ''}
@@ -455,19 +479,14 @@ async function preparaEnvio() {
   async function envia() {
     if (!arqs) return manual('não consegui gerar a imagem');
     const r = await mandaTudo(arqs, texto, d);
-    if (r === 'cancelou') return pedeToque();
+    if (r === 'cancelou') return fechaSheet();
     // pede um toque só uma vez: se recusar de novo, não fica preso no mesmo botão
     if (r === 'sem-toque' && !pediuToque) { pediuToque = true; return pedeToque(); }
     if (r !== 'ok') return manual(r === 'sem-toque' ? 'permissão negada' : r);
-    abreSheet(`<h3>✔ Enviado</h3>${topo}
-      ${cabe ? '<button class="grande sec" id="e-so-link">🔗 O link não foi junto? Enviar só o link</button>' : ''}
-      <button class="grande sec" id="e-fecha">Fechar</button>`);
-    $('sheet-box').dataset.link = link;
-    if (cabe) $('e-so-link').onclick = () => mandaLink(link);
-    $('e-fecha').onclick = fechaSheet;
+    fechaSheet();
+    toast(n < 11 ? `✔ Enviado. A escalação tem ${n} de 11: só entra na transmissão com os 11.` : '✔ Enviado', n >= 11);
   }
-  $('sheet-box').dataset.link = link;
-  await envia();
+  envia();
 }
 
 /* ⚙️ o que não é o dia a dia do treinador: lixeira, copiar o link e enviar direto pro PC da transmissão */
@@ -584,4 +603,5 @@ $('in-arquivo').addEventListener('change', async (e) => {
   document.title = `${T.name} · Copa Aranãs`;
   montaEstado(ler(chave));
   desenhaTime();
+  agendaPreparo();
 })();
