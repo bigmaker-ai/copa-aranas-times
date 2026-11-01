@@ -344,7 +344,7 @@ function abasDaPlanilha() {
   }
   return abas;
 }
-async function montaAnexos() {
+async function montaAnexos(d) {
   const lista = [];
   if (E.tit.some(Boolean)) {
     const png = await gerarImagemEscalacao({
@@ -355,7 +355,8 @@ async function montaAnexos() {
     lista.push(new File([png], nomeArquivo(`Escalação ${T.name}.png`), { type: 'image/png' }));
   }
   const abas = abasDaPlanilha();
-  const xlsx = new File([gerarXlsx(abas)], nomeArquivo(`Time ${T.name}.xlsx`), { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  // aba escondida com as alterações: se o WhatsApp perder o link, a planilha abre no site ("Abrir arquivo recebido")
+  const xlsx = new File([gerarXlsx(d ? [...abas, { nome: 'dados', oculta: true, larguras: [10], linhas: [[`#d=${d}`]] }] : abas)], nomeArquivo(`Time ${T.name}.xlsx`), { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const csv = new File([gerarCsv(abas.find((a) => a.nome === 'Elenco'))], nomeArquivo(`Time ${T.name}.csv`), { type: 'text/csv' });
   return { lista, xlsx, csv };
 }
@@ -367,29 +368,33 @@ function baixa(file) {
   a.click();
   a.remove();
 }
-/* alguns celulares não deixam compartilhar .xlsx: aí vai o .csv, que o Excel também abre */
-async function mandaArquivos(arqs) {
+const arquivoDosDados = (d) => new File([`Alterações do time ${T.name} para a transmissão da Copa Aranãs.\nAbra ${baseUrl()} e toque em "Abrir arquivo recebido".\n\n#d=${d}\n`], nomeArquivo(`Time ${T.name} (abrir no site).txt`), { type: 'text/plain' });
+
+/* tudo de uma vez: imagem + planilha + link. Responde: 'ok', 'cancelou' ou 'sem-toque' (o navegador quer outro toque) */
+async function mandaTudo(arqs, texto, d) {
   const comXlsx = [...arqs.lista, arqs.xlsx, ...(arqs.extra || [])];
-  const comCsv = [...arqs.lista, arqs.csv, ...(arqs.extra || [])];
-  const pode = navigator.canShare?.({ files: comXlsx }) ? comXlsx : navigator.canShare?.({ files: comCsv }) ? comCsv : null;
-  if (pode) {
-    try { await navigator.share({ files: pode }); return true; } catch (e) { if (e?.name === 'AbortError') return false; }
+  // alguns celulares não aceitam .xlsx: vai .csv, que o Excel também abre, e as alterações num .txt
+  const comCsv = [...arqs.lista, arqs.csv, ...(arqs.extra || [arquivoDosDados(d)])];
+  const files = navigator.canShare?.({ files: comXlsx }) ? comXlsx : navigator.canShare?.({ files: comCsv }) ? comCsv : null;
+  if (files) {
+    try { await navigator.share({ files, text: texto }); return 'ok'; } catch (e) {
+      if (e?.name === 'AbortError') return 'cancelou';
+      if (e?.name === 'NotAllowedError') return 'sem-toque';
+    }
   }
   for (const f of comXlsx) { baixa(f); await new Promise((r) => setTimeout(r, 400)); }
   toast('Arquivos baixados: agora mande no WhatsApp.', true);
-  return true;
+  return 'ok';
 }
 async function mandaLink(link) {
   const texto = `Time ${T.name}: alterações para a transmissão da Copa Aranãs. Toque no link para abrir:\n${link}`;
   if (navigator.share) {
-    try { await navigator.share({ text: texto }); return true; } catch (e) { if (e?.name === 'AbortError') return false; }
+    try { await navigator.share({ text: texto }); return; } catch (e) { if (e?.name === 'AbortError') return; }
   }
   // o wa.me não aguenta texto muito longo: aí copia
-  if (texto.length < 6000) { window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank'); return true; }
+  if (texto.length < 6000) { window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank'); return; }
   await copia(link);
-  return true;
 }
-const arquivoDosDados = (d) => new File([`Alterações do time ${T.name} para a transmissão da Copa Aranãs.\nAbra ${baseUrl()} e toque em "Abrir arquivo recebido".\n\n#d=${d}\n`], nomeArquivo(`Time ${T.name} (abrir no site).txt`), { type: 'text/plain' });
 
 async function preparaEnvio() {
   if (!confere()) return;
@@ -397,33 +402,32 @@ async function preparaEnvio() {
   if (!p.jogadores.length && !p.esc) return toast('Você ainda não alterou nada.');
   abreSheet('<h3>Preparando…</h3>');
   const d = await fecha(p);
-  const arqs = await montaAnexos();
-  const n = p.esc ? p.esc.tit.filter((x) => x != null).length : 11;
   const link = `${linkDoTime(T.slug)}#d=${d}`;
   const cabe = link.length <= LIMITE_LINK;
-  const oQue = arqs.lista.length ? 'imagem e planilha' : 'planilha';
-  const topo = `<h3>Tudo pronto</h3>
-    <div class="resumo">${linhasResumo(p).map((l) => `<div>${esc(l)}</div>`).join('')}</div>
+  const arqs = await montaAnexos(cabe ? d : null);
+  // com muitas fotos não cabe em link: as alterações vão num arquivo, junto com o resto
+  if (!cabe) arqs.extra = [arquivoDosDados(d)];
+  const texto = cabe ? `Time ${T.name}: alterações para a transmissão da Copa Aranãs. Toque no link para abrir:\n${link}` : `Time ${T.name}: alterações para a transmissão da Copa Aranãs.`;
+  const n = p.esc ? p.esc.tit.filter((x) => x != null).length : 11;
+  const topo = `<div class="resumo">${linhasResumo(p).map((l) => `<div>${esc(l)}</div>`).join('')}</div>
     ${n < 11 ? `<p class="aviso">⚠️ A escalação está com ${n} de 11: ela só entra na transmissão quando tiver os 11.</p>` : ''}`;
-  if (cabe) {
-    // o WhatsApp pode descartar o texto quando vai junto com arquivos: por isso o link vai primeiro, sozinho
-    abreSheet(`${topo}<button class="grande" id="e-link">📲 1 de 2 · Enviar alterações</button>
-      <button class="grande sec" id="e-arq">🖼 2 de 2 · Enviar ${oQue}</button>`);
+  const pedeToque = () => {
+    abreSheet(`<h3>Tudo pronto</h3>${topo}<button class="grande" id="e-zap">📲 Enviar por WhatsApp</button>`);
     $('sheet-box').dataset.link = link;
-    $('e-link').onclick = async () => {
-      if (!(await mandaLink(link))) return;
-      $('e-link').className = 'grande sec';
-      $('e-link').textContent = '✔ Alterações enviadas';
-      $('e-arq').className = 'grande';
-    };
-    $('e-arq').onclick = async () => { if (await mandaArquivos(arqs)) { $('e-arq').className = 'grande sec'; $('e-arq').textContent = `✔ ${oQue[0].toUpperCase()}${oQue.slice(1)} enviada${arqs.lista.length ? 's' : ''}`; } };
-  } else {
-    // com muitas fotos não cabe em link: as alterações vão num arquivo, junto com o resto
-    arqs.extra = [arquivoDosDados(d)];
-    abreSheet(`${topo}<button class="grande" id="e-arq">📲 Enviar por WhatsApp</button>`);
+    $('e-zap').onclick = envia;
+  };
+  async function envia() {
+    const r = await mandaTudo(arqs, texto, d);
+    if (r !== 'ok') return pedeToque();
+    abreSheet(`<h3>✔ Enviado</h3>${topo}
+      ${cabe ? '<button class="grande sec" id="e-so-link">🔗 O link não foi junto? Enviar só o link</button>' : ''}
+      <button class="grande sec" id="e-fecha">Fechar</button>`);
     $('sheet-box').dataset.link = link;
-    $('e-arq').onclick = () => mandaArquivos(arqs);
+    if (cabe) $('e-so-link').onclick = () => mandaLink(link);
+    $('e-fecha').onclick = fechaSheet;
   }
+  $('sheet-box').dataset.link = link;
+  await envia();
 }
 
 /* ⚙️ o que não é o dia a dia do treinador: copiar o link e enviar direto pro PC da transmissão */
