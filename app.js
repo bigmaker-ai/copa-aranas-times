@@ -1,7 +1,7 @@
 /* SITE DOS TIMES · Copa Aranãs: página estática (GitHub Pages), sem servidor e sem conta.
  * As alterações viajam DENTRO do link que o treinador manda no WhatsApp (#d=…); quem aplica no sistema é
  * a página /receber-time do PC da transmissão, aberta pelo botão 📡 (o site é https e não enxerga o PC na rede). */
-const POSICOES = [['GK', 'Goleiro'], ['DF', 'Defesa'], ['MF', 'Meio'], ['FW', 'Ataque']];
+const POSICOES = [['GK', 'Goleiro'], ['LT', 'Lateral'], ['DF', 'Defesa'], ['MF', 'Meio'], ['FW', 'Ataque']];
 const FORMACOES = ['4-3-3', '4-2-3-1', '4-4-2', '4-1-4-1', '3-5-2', '3-4-3', '5-3-2', '4-2-2-2'];
 /* acima disso não vai como link: vai como arquivo (o texto longo demais pode não abrir no WhatsApp) */
 const LIMITE_LINK = 20000;
@@ -45,10 +45,14 @@ async function abre(txt) {
 const lerp = (a, b, t) => a + (b - a) * t;
 function lugares(form) {
   const rows = form.split('-').map(Number).filter((n) => n > 0);
-  const out = [{ x: 0.5, y: 0.93 }];
+  const out = [{ x: 0.5, y: 0.93, pos: 'GK' }];
   rows.forEach((count, r) => {
     const y = rows.length === 1 ? 0.5 : lerp(0.76, 0.1, r / (rows.length - 1));
-    for (let i = 0; i < count; i++) out.push({ x: count === 1 ? 0.5 : lerp(0.13, 0.87, i / (count - 1)), y });
+    for (let i = 0; i < count; i++) {
+      // na linha de defesa com 4 ou 5, as pontas são os laterais
+      const pos = r === 0 ? (count >= 4 && (i === 0 || i === count - 1) ? 'LT' : 'DF') : r === rows.length - 1 ? 'FW' : 'MF';
+      out.push({ x: count === 1 ? 0.5 : lerp(0.13, 0.87, i / (count - 1)), y, pos });
+    }
   });
   return out;
 }
@@ -243,7 +247,7 @@ function desenhaEscalacao() {
     <div class="campo">${L.map((p, i) => {
       const j = E.tit[i] ? porId(E.tit[i]) : null;
       const f = j && fotoDe(j);
-      return `<button class="slot ${j ? 'tem' : ''}" data-slot="${i}" style="left:${(p.x * 100).toFixed(1)}%;top:${(p.y * 100).toFixed(1)}%"><i>${j ? (f ? `<img src="${esc(f)}" alt="">` : esc(j.num)) : '＋'}</i><span>${j ? `${esc(j.num)} ${esc(curto(j))}` : (i === 0 ? 'Goleiro' : '')}</span></button>`;
+      return `<button class="slot ${j ? 'tem' : ''}" data-slot="${i}" style="left:${(p.x * 100).toFixed(1)}%;top:${(p.y * 100).toFixed(1)}%"><i>${j ? (f ? `<img src="${esc(f)}" alt="">` : esc(j.num)) : '＋'}</i><span>${j ? `${esc(j.num)} ${esc(curto(j))}` : esc(POS_NOME[p.pos])}</span></button>`;
     }).join('')}</div>
     <p class="conta ${n === 11 ? 'ok' : ''}">${n === 11 ? '✔ Time completo: 11 de 11' : `${n} de 11 titulares · toque em cada lugar`}</p>
     <h2>Reservas (toque para marcar)</h2>
@@ -258,12 +262,16 @@ function desenhaEscalacao() {
 }
 function escolheLugar(i) {
   const atual = E.tit[i];
-  const peso = (j) => (i === 0 ? (j.pos === 'GK' ? 0 : 1) : (j.pos === 'GK' ? 1 : 0));
-  const lista = jogs.filter((j) => !j.x).sort((a, b) => peso(a) - peso(b) || Number(a.num) - Number(b.num));
-  abreSheet(`<h3>${i === 0 ? 'Quem é o goleiro?' : 'Quem joga aqui?'}</h3>
+  const pos = lugares(E.form)[i].pos;
+  // primeiro quem joga na posição deste lugar; depois todos os outros, pelo número da camisa
+  const todos = jogs.filter((j) => !j.x).sort((a, b) => Number(a.num) - Number(b.num));
+  const daPosicao = todos.filter((j) => j.pos === pos), outros = todos.filter((j) => j.pos !== pos);
+  const item = (j) => { const f = fotoDe(j); const em = E.tit.includes(j.id);
+    return `<button class="op" data-esc="${esc(j.id)}">${f ? `<img src="${esc(f)}" alt="" loading="lazy">` : `<span class="sem">${esc(j.num)}</span>`}<span><b>${esc(j.num)} · ${esc(j.nome)}</b>${em ? '<small>já está no campo: troca de lugar</small>' : ''}</span></button>`; };
+  abreSheet(`<h3>${esc(POS_NOME[pos])}: quem joga aqui?</h3>
     ${atual ? '<button class="grande sec" id="vazio" style="margin-bottom:10px">Deixar este lugar vazio</button>' : ''}
-    ${lista.map((j) => { const f = fotoDe(j); const em = E.tit.includes(j.id);
-      return `<button class="op" data-esc="${esc(j.id)}">${f ? `<img src="${esc(f)}" alt="" loading="lazy">` : `<span class="sem">${esc(j.num)}</span>`}<span><b>${esc(j.num)} · ${esc(j.nome)}</b>${em ? '<small>já está no campo: troca de lugar</small>' : ''}</span></button>`; }).join('')}`);
+    ${daPosicao.length ? `<h2>${esc(POS_NOME[pos])}</h2>${daPosicao.map(item).join('')}` : ''}
+    ${outros.length ? `<h2>${daPosicao.length ? 'Os outros, por número' : 'Todos, por número'}</h2>${outros.map(item).join('')}` : ''}`);
   if (atual) $('vazio').onclick = () => { E.tit[i] = null; guarda(); fechaSheet(); desenhaEscalacao(); };
   $('sheet-box').querySelectorAll('[data-esc]').forEach((b) => { b.onclick = () => {
     const id = b.dataset.esc, ja = E.tit.indexOf(id);
@@ -332,7 +340,7 @@ function linhasResumo(p) {
 }
 /* ── o que vai junto: imagem da escalação e planilha ── */
 const nomeArquivo = (t) => t.replace(/[\\/:*?"<>|]/g, '').trim();
-const POS_NOME = { GK: 'Goleiro', DF: 'Defesa', MF: 'Meio-campo', FW: 'Ataque' };
+const POS_NOME = { GK: 'Goleiro', LT: 'Lateral', DF: 'Defesa', MF: 'Meio-campo', FW: 'Ataque' };
 function abasDaPlanilha(modo) {
   const celNum = (j) => (numValido(j.num) ? Number(j.num) : j.num);
   const lista = jogs.filter((j) => !j.x).sort((a, b) => Number(a.num) - Number(b.num));
@@ -379,21 +387,19 @@ function baixa(file) {
 }
 const arquivoDosDados = (d) => new File([`Alterações do time ${T.name} para a transmissão da Copa Aranãs.\nAbra ${baseUrl()} e toque em "Abrir arquivo recebido".\n\n#d=${d}\n`], nomeArquivo(`Time ${T.name} (abrir no site).txt`), { type: 'text/plain' });
 
-/* tudo de uma vez: imagem + planilha + link. Responde: 'ok', 'cancelou' ou 'sem-toque' (o navegador quer outro toque) */
+/* tudo de uma vez: imagem + planilha + link. Responde: 'ok', 'cancelou', 'sem-toque' (o navegador quer outro toque)
+ * ou o motivo de não ter dado certo */
 async function mandaTudo(arqs, texto, d) {
   const comXlsx = [...arqs.lista, arqs.xlsx, ...(arqs.extra || [])];
   // alguns celulares não aceitam .xlsx: vai .csv, que o Excel também abre, e as alterações num .txt
   const comCsv = [...arqs.lista, arqs.csv, ...(arqs.extra || [arquivoDosDados(d)])];
   const files = navigator.canShare?.({ files: comXlsx }) ? comXlsx : navigator.canShare?.({ files: comCsv }) ? comCsv : null;
-  if (files) {
-    try { await navigator.share({ files, text: texto }); return 'ok'; } catch (e) {
-      if (e?.name === 'AbortError') return 'cancelou';
-      if (e?.name === 'NotAllowedError') return 'sem-toque';
-    }
+  if (!files) return 'navegador sem compartilhar arquivos';
+  try { await navigator.share({ files, text: texto }); return 'ok'; } catch (e) {
+    if (e?.name === 'AbortError') return 'cancelou';
+    if (e?.name === 'NotAllowedError') return 'sem-toque';
+    return e?.name || 'erro';
   }
-  for (const f of comXlsx) { baixa(f); await new Promise((r) => setTimeout(r, 400)); }
-  toast('Arquivos baixados: agora mande no WhatsApp.', true);
-  return 'ok';
 }
 async function mandaLink(link) {
   const texto = `Time ${T.name}: alterações para a transmissão da Copa Aranãs. Toque no link para abrir:\n${link}`;
@@ -415,22 +421,44 @@ async function preparaEnvio() {
   const d = await fecha(p);
   const link = `${linkDoTime(T.slug)}#d=${d}`;
   const cabe = link.length <= LIMITE_LINK;
-  const arqs = await montaAnexos(cabe ? d : null, modo);
+  let arqs = null;
+  try { arqs = await montaAnexos(cabe ? d : null, modo); } catch (e) { console.error(e); }
   // com muitas fotos não cabe em link: as alterações vão num arquivo, junto com o resto
-  if (!cabe) arqs.extra = [arquivoDosDados(d)];
+  if (arqs && !cabe) arqs.extra = [arquivoDosDados(d)];
   const assunto = `Time ${T.name}: ${modo === 'jogadores' ? 'lista de jogadores' : 'escalação'} para a transmissão da Copa Aranãs.`;
   const texto = cabe ? `${assunto} Toque no link para abrir:\n${link}` : assunto;
   const n = p.esc ? p.esc.tit.filter((x) => x != null).length : 11;
   const topo = `<div class="resumo">${linhasResumo(p).map((l) => `<div>${esc(l)}</div>`).join('')}</div>
     ${n < 11 ? `<p class="aviso">⚠️ A escalação está com ${n} de 11: ela só entra na transmissão quando tiver os 11.</p>` : ''}`;
+  let pediuToque = false;
   const pedeToque = () => {
     abreSheet(`<h3>Tudo pronto</h3>${topo}<button class="grande" id="e-zap">📲 Enviar por WhatsApp</button>`);
     $('sheet-box').dataset.link = link;
     $('e-zap').onclick = envia;
   };
+  /* quando o navegador não compartilha: um link de verdade pro WhatsApp (abre sempre) e os arquivos para anexar */
+  const manual = (motivo) => {
+    const wa = `https://wa.me/?text=${encodeURIComponent(texto)}`;
+    const linkCabe = cabe && wa.length < 7000;
+    abreSheet(`<h3>Enviar pelo WhatsApp</h3>${topo}
+      <a class="grande" id="m-zap" href="${esc(linkCabe ? wa : 'https://wa.me/')}" target="_blank" rel="noopener">📲 Abrir o WhatsApp${linkCabe ? ' com o link' : ''}</a>
+      ${cabe && !linkCabe ? '<button class="grande sec" id="m-copia">🔗 Copiar o link</button>' : ''}
+      ${arqs ? '<button class="grande sec" id="m-baixa">⬇️ Baixar imagem e planilha para anexar</button>' : ''}
+      <p class="muted" style="font-size:13px;margin:10px 0 0">Este navegador não anexa os arquivos sozinho (${esc(motivo)}).</p>`);
+    $('sheet-box').dataset.link = link;
+    if (cabe && !linkCabe) $('m-copia').onclick = () => copia(link);
+    if (arqs) $('m-baixa').onclick = async () => {
+      for (const f of [...arqs.lista, arqs.xlsx, ...(arqs.extra || [])]) { baixa(f); await new Promise((r) => setTimeout(r, 400)); }
+      toast('Arquivos baixados: anexe no WhatsApp.', true);
+    };
+  };
   async function envia() {
+    if (!arqs) return manual('não consegui gerar a imagem');
     const r = await mandaTudo(arqs, texto, d);
-    if (r !== 'ok') return pedeToque();
+    if (r === 'cancelou') return pedeToque();
+    // pede um toque só uma vez: se recusar de novo, não fica preso no mesmo botão
+    if (r === 'sem-toque' && !pediuToque) { pediuToque = true; return pedeToque(); }
+    if (r !== 'ok') return manual(r === 'sem-toque' ? 'permissão negada' : r);
     abreSheet(`<h3>✔ Enviado</h3>${topo}
       ${cabe ? '<button class="grande sec" id="e-so-link">🔗 O link não foi junto? Enviar só o link</button>' : ''}
       <button class="grande sec" id="e-fecha">Fechar</button>`);
