@@ -71,6 +71,10 @@ h2 { font-size: 13px; letter-spacing: 1px; text-transform: uppercase; color: var
 
 /* botão de enviar sempre à vista */
 .rodape { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: linear-gradient(transparent, var(--bg) 26%); padding: 18px 16px calc(12px + env(safe-area-inset-bottom)); }
+.entrada { text-align: center; padding-top: 8vh; }
+.entrada img { width: 110px; height: 110px; object-fit: contain; }
+.entrada input { text-align: center; font-size: 22px; font-weight: 800; }
+.senha-time { display: inline; color: var(--green); letter-spacing: 1px; }
 .estado-salvo { margin: 0 auto 6px; max-width: 528px; text-align: center; font-size: 13px; color: var(--muted); min-height: 18px; }
 .grande { display: block; width: 100%; max-width: 528px; margin: 0 auto; min-height: 58px; border: 0; border-radius: 14px; background: var(--green); color: #052; font-weight: 800; font-size: 18px; text-align: center; }
 .grande.sec { background: var(--card2); color: var(--text); border: 1px solid var(--line); }

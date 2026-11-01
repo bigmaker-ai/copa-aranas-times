@@ -1,9 +1,9 @@
 /* SITE DOS TIMES · Copa Aranãs: página estática (GitHub Pages) + banco na Cloudflare (site-times/worker).
- * Cada time tem um link com código: quem tem o link vê e altera. Tudo salva sozinho, por jogador.
+ * Cada time tem a sua senha, pedida ao abrir o link (e lembrada neste aparelho). Tudo salva sozinho, por jogador.
  * Pra transmissão, o botão 📡 abre a página /receber-time do PC com tudo no endereço (o site é https e não
  * enxerga o PC na rede); o link longo no WhatsApp também leva tudo, então o PC não depende do banco. */
 const API = /^(127\.0\.0\.1|localhost)$/.test(location.hostname) ? 'http://127.0.0.1:8787' : 'https://copa-times.copa-aranas-times-api.workers.dev';
-const CODIGO = new URLSearchParams(location.search).get('c') || '';
+let CODIGO = '';
 const POSICOES = [['GK', 'Goleiro'], ['LT', 'Lateral'], ['DF', 'Defesa'], ['MF', 'Meio'], ['FW', 'Ataque']];
 const FORMACOES = ['4-3-3', '4-2-3-1', '4-4-2', '4-1-4-1', '3-5-2', '3-4-3', '5-3-2', '4-2-2-2'];
 /* acima disso não vai como link: vai como arquivo (o texto longo demais pode não abrir no WhatsApp) */
@@ -15,7 +15,7 @@ const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const ler = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
 const grava = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
 const baseUrl = () => location.origin + location.pathname;
-const linkDoTime = (slug, c = CODIGO) => `${baseUrl()}?time=${slug}${c ? `&c=${c}` : ''}`;
+const linkDoTime = (slug) => `${baseUrl()}?time=${slug}`;
 
 function toast(txt, bom) {
   const t = $('toast');
@@ -654,8 +654,8 @@ function abreLixeira() {
   }; });
 }
 
-async function copia(txt) {
-  try { await navigator.clipboard.writeText(txt); toast('Link copiado: cole no WhatsApp.', true); }
+async function copia(txt, aviso = 'Link copiado: cole no WhatsApp.') {
+  try { await navigator.clipboard.writeText(txt); toast(aviso, true); }
   catch { prompt('Copie o link:', txt); }
 }
 
@@ -702,13 +702,17 @@ async function listaTimes() {
   try { r = await fetch(`${API}/admin/codigos`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ senha: senhaAdm, slugs: times.map((t) => t.slug) }) }).then((x) => x.json()); }
   catch { return toast('Sem internet: não deu para abrir a lista.'); }
   if (!r.ok) { senhaAdm = ''; try { sessionStorage.removeItem('copa.adm'); } catch { /* */ } return toast(r.error || 'senha errada'); }
-  $('app').innerHTML = `<h1>Times da Copa Aranãs</h1><p class="sub">Escolha o time e mande o link dele para o treinador.</p>
+  const senhaDe = (slug) => r.codigos[slug];
+  $('app').innerHTML = `<h1>Times da Copa Aranãs</h1><p class="sub">Mande o link e a senha de cada time para o treinador dele.</p>
+    <button class="grande sec" id="copia-senhas">📋 Copiar todas as senhas</button>
     <button class="grande sec" id="abrir-arq" style="margin-bottom:14px">📂 Abrir arquivo recebido</button>
-    ${times.map((t) => `<div class="cartao"><a href="${esc(linkDoTime(t.slug, r.codigos[t.slug]))}"><img src="${esc(t.logo)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span><b>${esc(t.name)}</b><small>${t.jogadores} jogadores</small></span></a><button data-link="${esc(t.slug)}" data-nome="${esc(t.name)}">📲 Mandar link</button></div>`).join('')}`;
+    ${times.map((t) => `<div class="cartao"><a href="${esc(linkDoTime(t.slug))}" data-entra="${esc(t.slug)}"><img src="${esc(t.logo)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span><b>${esc(t.name)}</b><small>Senha: <b class="senha-time">${esc(senhaDe(t.slug))}</b> · ${t.jogadores} jogadores</small></span></a><button data-link="${esc(t.slug)}" data-nome="${esc(t.name)}">📲 Mandar</button></div>`).join('')}`;
   $('abrir-arq').onclick = () => $('in-arquivo').click();
+  $('copia-senhas').onclick = () => copia(times.map((t) => `${t.name}: ${senhaDe(t.slug)}`).join('\n'), 'Senhas copiadas.');
+  // o técnico já entrou com a senha dele: abre o time direto
+  document.querySelectorAll('[data-entra]').forEach((a) => { a.onclick = () => { grava(`copa.senha.${a.dataset.entra}`, senhaDe(a.dataset.entra)); }; });
   document.querySelectorAll('[data-link]').forEach((b) => { b.onclick = async () => {
-    const link = linkDoTime(b.dataset.link, r.codigos[b.dataset.link]);
-    const texto = `Treinador do ${b.dataset.nome}: confira os jogadores e a escalação e corrija o que precisar. Tudo salva sozinho.\n${link}`;
+    const texto = `Treinador do ${b.dataset.nome}: confira os jogadores e a escalação e corrija o que precisar. Tudo salva sozinho.\n${linkDoTime(b.dataset.link)}\nSenha: ${senhaDe(b.dataset.link)}`;
     if (navigator.share) { try { await navigator.share({ text: texto }); return; } catch (e) { if (e?.name === 'AbortError') return; } }
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
   }; });
@@ -733,12 +737,41 @@ $('in-arquivo').addEventListener('change', async (e) => {
   } catch { $('app').innerHTML = '<h1>Time não encontrado</h1><p class="sub">Confira o link que você recebeu.</p>'; return; }
   chave = `copa.time.${T.slug}`;
   document.title = `${T.name} · Copa Aranãs`;
-  const invalido = () => { $('app').innerHTML = '<h1>Link incompleto</h1><p class="sub">Peça o link deste time para o organizador da Copa.</p>'; };
-  if (!CODIGO) return invalido();
+  CODIGO = ler(`copa.senha.${T.slug}`) || '';
+  if (!CODIGO) return telaSenhaTime();
+  abreTime();
+})();
+
+/* antes de tudo, a senha do time */
+function telaSenhaTime(aviso) {
+  $('app').innerHTML = `<div class="entrada">
+    ${T.logo ? `<img src="${esc(T.logo)}" alt="" onerror="this.style.visibility='hidden'">` : ''}
+    <h1>${esc(T.name)}</h1>
+    <p class="sub">Digite a senha do time para entrar.</p>
+    <form id="f-time"><input class="tec" id="senha-time" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Senha" aria-label="Senha do time">
+    <div style="height:10px"></div><button class="grande" type="submit">Entrar</button></form>
+    <p class="aviso" id="time-erro" style="margin:12px 0 0" ${aviso ? '' : 'hidden'}>${esc(aviso || '')}</p>
+  </div>`;
+  $('f-time').onsubmit = async (e) => {
+    e.preventDefault();
+    const botao = $('f-time').querySelector('button');
+    botao.disabled = true;
+    botao.textContent = 'Entrando…';
+    $('time-erro').hidden = true;
+    let r;
+    try { r = await fetch(`${API}/t/${T.slug}/entrar`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ senha: $('senha-time').value.trim().normalize('NFC') }) }).then((x) => x.json()); }
+    catch { r = { ok: false, error: 'Sem internet: tente de novo.' }; }
+    if (!r.ok) { botao.disabled = false; botao.textContent = 'Entrar'; $('time-erro').textContent = r.error || 'senha errada'; $('time-erro').hidden = false; return; }
+    CODIGO = r.c;
+    grava(`copa.senha.${T.slug}`, CODIGO);
+    abreTime();
+  };
+}
+async function abreTime() {
   let r = null;
   try {
     const x = await fetch(`${API}/t/${T.slug}?c=${encodeURIComponent(CODIGO)}`);
-    if (x.status === 403) return invalido();
+    if (x.status === 403) { CODIGO = ''; grava(`copa.senha.${T.slug}`, null); return telaSenhaTime(); }
     r = await x.json();
     grava(`${chave}.banco`, r);
   } catch {
@@ -760,4 +793,4 @@ $('in-arquivo').addEventListener('change', async (e) => {
   if (pend) salvaAgora();
   setInterval(buscaNovidades, 30000);
   document.addEventListener('visibilitychange', () => { if (document.hidden) salvaAgora(true); else buscaNovidades(); });
-})();
+}
