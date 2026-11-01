@@ -60,9 +60,9 @@ function montaEstado(rasc) {
   const r = rasc || {};
   jogs = T.players.map((p) => {
     const ed = r.ed?.[p.orig] || {};
-    return { id: p.orig, o: p.orig, num0: p.number, nome0: p.name, pos0: p.position || '', foto: p.photo || '', num: ed.num ?? String(p.number), nome: ed.nome ?? p.name, pos: ed.pos ?? (p.position || ''), f: ed.f || '', x: !!ed.x };
+    return { id: p.orig, o: p.orig, num0: p.number, nome0: p.name, pos0: p.position || '', foto: p.photo || '', num: ed.num ?? String(p.number), nome: ed.nome ?? p.name, pos: ed.pos ?? (p.position || ''), f: ed.f || '', x: !!ed.x, rest: !!ed.rest };
   });
-  for (const n of r.novos || []) jogs.push({ id: n.id, o: null, foto: '', num: n.num ?? '', nome: n.nome ?? '', pos: n.pos ?? '', f: n.f || '', x: false });
+  for (const n of r.novos || []) jogs.push({ id: n.id, o: null, foto: '', num: n.num ?? '', nome: n.nome ?? '', pos: n.pos ?? '', f: n.f || '', x: !!n.x });
   E = { form: FORMACOES.includes(r.esc?.form) ? r.esc.form : '4-3-3', tit: Array.isArray(r.esc?.tit) && r.esc.tit.length === 11 ? r.esc.tit : Array(11).fill(null), res: r.esc?.res || [], tec: r.esc?.tec ?? '' };
   limpaEsc();
 }
@@ -80,8 +80,8 @@ const mexido = (j) => j.o == null || j.x || !!j.f || mudouCampos(j);
 function guarda() {
   const ed = {}, novos = [];
   for (const j of jogs) {
-    if (j.o == null) novos.push({ id: j.id, num: j.num, nome: j.nome, pos: j.pos, f: j.f });
-    else if (mexido(j)) ed[j.o] = { num: j.num, nome: j.nome, pos: j.pos, f: j.f, x: j.x };
+    if (j.o == null) novos.push({ id: j.id, num: j.num, nome: j.nome, pos: j.pos, f: j.f, x: j.x });
+    else if (mexido(j) || j.rest) ed[j.o] = { num: j.num, nome: j.nome, pos: j.pos, f: j.f, x: j.x, rest: j.rest };
   }
   if (!grava(chave, { ed, novos, esc: E })) toast('Sem espaço para guardar neste celular: envie logo o que já fez.');
 }
@@ -106,7 +106,7 @@ function desenhaTime() {
       </div>
     </div>
     <div id="corpo"></div>
-    <div class="rodape"><button class="grande" id="enviar">✅ Salvar e enviar por WhatsApp</button></div>`;
+    <div class="rodape"><button class="grande" id="enviar">✅ Enviar ${aba === 'jogadores' ? 'jogadores' : 'escalação'} por WhatsApp</button></div>`;
   document.querySelectorAll('[data-aba]').forEach((b) => { b.onclick = () => { aba = b.dataset.aba; desenhaTime(); scrollTo(0, 0); }; });
   $('enviar').onclick = preparaEnvio;
   $('eng').onclick = abreEngrenagem;
@@ -115,7 +115,6 @@ function desenhaTime() {
 
 /* ── 👥 jogadores ── */
 function cardJogador(j, rep) {
-  if (j.x) return `<div class="saiu" data-card="${esc(j.id)}"><span>🗑 ${esc(j.nome)} vai sair do time</span><button data-desfaz="${esc(j.id)}">Desfazer</button></div>`;
   const n = String(j.num).trim();
   const ruim = !numValido(n) || rep[Number(n)] > 1;
   const f = fotoDe(j);
@@ -129,14 +128,14 @@ function cardJogador(j, rep) {
     <div>
       <textarea data-nome="${esc(j.id)}" rows="1" maxlength="40" placeholder="Nome do jogador" aria-label="Nome">${esc(j.nome)}</textarea>
       <div class="pos">${POSICOES.map(([v, t]) => `<button data-pos="${esc(j.id)}" data-v="${v}" class="${j.pos === v ? 'on' : ''}">${t}</button>`).join('')}</div>
-      <button class="lixo" data-tira="${esc(j.id)}">🗑 tirar do time</button>
+      <button class="lixo" data-exclui="${esc(j.id)}">🗑 Excluir</button>
     </div>
   </div>`;
 }
 function desenhaJogadores() {
   const rep = repetidos();
-  const ordem = jogs.filter((j) => j.o != null).sort((a, b) => a.num0 - b.num0);
-  const novos = jogs.filter((j) => j.o == null);
+  const ordem = jogs.filter((j) => j.o != null && !j.x).sort((a, b) => a.num0 - b.num0);
+  const novos = jogs.filter((j) => j.o == null && !j.x);
   $('corpo').innerHTML = `
     <p class="dica">Corrija o que estiver errado. Toque na foto para trocar. O que você não mexer continua igual.</p>
     <button class="novo" id="novo">＋ Adicionar jogador</button>
@@ -162,21 +161,14 @@ function desenhaJogadores() {
     marcaErros();
   }; });
   c.querySelectorAll('[data-foto]').forEach((b) => { b.onclick = () => pedeFoto(porId(b.dataset.foto)); });
-  c.querySelectorAll('[data-tira]').forEach((b) => { b.onclick = () => confirmaTirar(porId(b.dataset.tira)); });
-  c.querySelectorAll('[data-desfaz]').forEach((b) => { b.onclick = () => { porId(b.dataset.desfaz).x = false; guarda(); desenhaJogadores(); }; });
+  c.querySelectorAll('[data-exclui]').forEach((b) => { b.onclick = () => {
+    const j = porId(b.dataset.exclui);
+    j.x = true;
+    j.rest = false;
+    limpaEsc(); guarda(); desenhaJogadores();
+    toast(`${j.nome.trim() || 'Jogador'} foi para a lixeira (⚙️ no topo).`, true);
+  }; });
 }
-/* esbarrar não tira ninguém: o botão principal é o de manter */
-function confirmaTirar(j) {
-  abreSheet(`<h3>Tirar ${esc(j.nome.trim() || 'este jogador')} do time?</h3>
-    <button class="grande" id="tira-nao">Não, manter</button>
-    <button class="grande perigo" id="tira-sim">Sim, tirar do time</button>`);
-  $('tira-nao').onclick = fechaSheet;
-  $('tira-sim').onclick = () => {
-    if (j.o == null) jogs = jogs.filter((x) => x !== j); else j.x = true;
-    limpaEsc(); guarda(); fechaSheet(); desenhaJogadores();
-  };
-}
-
 /* o nome aparece inteiro, em quantas linhas precisar */
 function ajustaAltura(t) { t.style.height = 'auto'; t.style.height = `${t.scrollHeight + 2}px`; }
 addEventListener('resize', () => document.querySelectorAll('[data-nome]').forEach(ajustaAltura));
@@ -283,10 +275,13 @@ function escolheLugar(i) {
 }
 
 /* ── ✅ enviar ── */
-function montaPacote() {
+/* modo: 'jogadores' = só a lista · 'escalacao' = a escalação · 'tudo' = os dois (⚙️ enviar direto pro PC).
+ * A escalação leva junto as correções do elenco: ela aponta pros números novos e pros jogadores novos. */
+function montaPacote(modo) {
   const jogadores = [];
   for (const j of jogs) {
     if (!mexido(j)) continue;
+    if (j.o == null && j.x) continue;
     if (j.o == null) { jogadores.push({ num: Number(j.num), nome: j.nome.trim().toUpperCase(), pos: j.pos, ...(j.f ? { f: j.f } : {}) }); continue; }
     if (j.x) { jogadores.push({ o: j.o, nome: j.nome0, x: true }); continue; }
     const p = { o: j.o };
@@ -297,9 +292,18 @@ function montaPacote() {
     jogadores.push(p);
   }
   const n = E.tit.filter(Boolean).length;
-  const lista = jogs.filter((j) => !j.x).sort((a, b) => Number(a.num) - Number(b.num)).map((j) => [Number(j.num), j.nome.trim().toUpperCase(), j.pos]);
-  const pac = { v: 1, slug: T.slug, nome: T.name, t: Date.now(), jogadores, lista };
-  if (n) pac.esc = { form: E.form, tit: E.tit.map((id) => (id ? Number(porId(id).num) : null)), res: E.res.map((id) => Number(porId(id).num)), tec: E.tec.trim() };
+  const pac = { v: 1, slug: T.slug, nome: T.name, t: Date.now(), jogadores };
+  // voltou da lixeira: se o sistema já tinha tirado, traz de volta
+  const voltaram = jogs.filter((j) => j.rest && !j.x).map((j) => j.o);
+  if (voltaram.length) pac.restaurar = voltaram;
+  if (modo === 'escalacao') {
+    const linha = (id, f) => { const j = porId(id); return [Number(j.num), j.nome.trim().toUpperCase(), f]; };
+    pac.listaTitulo = 'Escalação';
+    pac.lista = [...E.tit.filter(Boolean).map((id) => linha(id, 'Titular')), ...E.res.map((id) => linha(id, 'Reserva'))];
+  } else {
+    pac.lista = jogs.filter((j) => !j.x).sort((a, b) => Number(a.num) - Number(b.num)).map((j) => [Number(j.num), j.nome.trim().toUpperCase(), j.pos]);
+  }
+  if (n && modo !== 'jogadores') pac.esc = { form: E.form, tit: E.tit.map((id) => (id ? Number(porId(id).num) : null)), res: E.res.map((id) => Number(porId(id).num)), tec: E.tec.trim() };
   return pac;
 }
 function confere() {
@@ -319,34 +323,39 @@ function linhasResumo(p) {
   const l = [];
   if (c) l.push(`✏️ ${c} jogador${c > 1 ? 'es' : ''} corrigido${c > 1 ? 's' : ''}`);
   if (nv) l.push(`➕ ${nv} jogador${nv > 1 ? 'es' : ''} novo${nv > 1 ? 's' : ''}`);
-  if (x) l.push(`🗑 ${x} tirado${x > 1 ? 's' : ''} do time`);
+  if (x) l.push(`🗑 ${x} excluído${x > 1 ? 's' : ''}`);
+  if (p.restaurar?.length) l.push(`↩ ${p.restaurar.length} restaurado${p.restaurar.length > 1 ? 's' : ''}`);
   if (f) l.push(`📷 ${f} foto${f > 1 ? 's' : ''} nova${f > 1 ? 's' : ''}`);
   if (p.esc) l.push(`📋 Escalação ${p.esc.form}: ${p.esc.tit.filter((n) => n != null).length} de 11`);
+  else if (p.lista) l.push(`👥 Lista com ${p.lista.length} jogador${p.lista.length > 1 ? 'es' : ''}`);
   return l;
 }
 /* ── o que vai junto: imagem da escalação e planilha ── */
 const nomeArquivo = (t) => t.replace(/[\\/:*?"<>|]/g, '').trim();
 const POS_NOME = { GK: 'Goleiro', DF: 'Defesa', MF: 'Meio-campo', FW: 'Ataque' };
-function abasDaPlanilha() {
+function abasDaPlanilha(modo) {
   const celNum = (j) => (numValido(j.num) ? Number(j.num) : j.num);
   const lista = jogs.filter((j) => !j.x).sort((a, b) => Number(a.num) - Number(b.num));
-  const abas = [{
+  if (modo === 'jogadores') return [{
     nome: 'Elenco', larguras: [7, 42, 14], titulos: [0],
     linhas: [['Nº', 'Nome', 'Posição'], ...lista.map((j) => [celNum(j), j.nome.trim().toUpperCase(), POS_NOME[j.pos] || ''])],
   }];
-  if (E.tit.some(Boolean)) {
-    const lin = (j, f) => [f, celNum(j), j.nome.trim().toUpperCase(), POS_NOME[j.pos] || ''];
-    const titulares = E.tit.filter(Boolean).map(porId), reservas = E.res.map(porId);
-    abas.unshift({
-      nome: 'Escalação', larguras: [12, 7, 42, 14], titulos: [3],
+  const lin = (j, f) => [f, celNum(j), j.nome.trim().toUpperCase(), POS_NOME[j.pos] || ''];
+  const titulares = E.tit.filter(Boolean).map(porId), reservas = E.res.map(porId);
+  return [{
+    nome: 'Escalação', larguras: [12, 7, 42, 14], titulos: [3],
       linhas: [['Time', T.name], ['Formação', E.form], ['Técnico', E.tec.trim()], ['Função', 'Nº', 'Nome', 'Posição'], ...titulares.map((j) => lin(j, 'Titular')), ...reservas.map((j) => lin(j, 'Reserva'))],
-    });
-  }
-  return abas;
+  }];
 }
-async function montaAnexos(d) {
+async function montaAnexos(d, modo) {
   const lista = [];
-  if (E.tit.some(Boolean)) {
+  if (modo === 'jogadores') {
+    const png = await gerarImagemJogadores({
+      time: T.name, logo: T.logo,
+      jogadores: jogs.filter((j) => !j.x).sort((a, b) => Number(a.num) - Number(b.num)).map((j) => ({ number: j.num, nome: j.nome.trim().toUpperCase(), posicao: POS_NOME[j.pos] || '', photo: fotoDe(j) })),
+    });
+    lista.push(new File([png], nomeArquivo(`Jogadores ${T.name}.png`), { type: 'image/png' }));
+  } else {
     const png = await gerarImagemEscalacao({
       time: T.name, logo: T.logo, formacao: E.form, tecnico: E.tec.trim(), slots: lugares(E.form),
       titulares: E.tit.map((id) => { const j = id && porId(id); return j ? { number: j.num, nome: curto(j), photo: fotoDe(j) } : null; }),
@@ -354,10 +363,10 @@ async function montaAnexos(d) {
     });
     lista.push(new File([png], nomeArquivo(`Escalação ${T.name}.png`), { type: 'image/png' }));
   }
-  const abas = abasDaPlanilha();
+  const abas = abasDaPlanilha(modo);
   // aba escondida com as alterações: se o WhatsApp perder o link, a planilha abre no site ("Abrir arquivo recebido")
   const xlsx = new File([gerarXlsx(d ? [...abas, { nome: 'dados', oculta: true, larguras: [10], linhas: [[`#d=${d}`]] }] : abas)], nomeArquivo(`Time ${T.name}.xlsx`), { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-  const csv = new File([gerarCsv(abas.find((a) => a.nome === 'Elenco'))], nomeArquivo(`Time ${T.name}.csv`), { type: 'text/csv' });
+  const csv = new File([gerarCsv(abas[0])], nomeArquivo(`Time ${T.name}.csv`), { type: 'text/csv' });
   return { lista, xlsx, csv };
 }
 function baixa(file) {
@@ -398,16 +407,19 @@ async function mandaLink(link) {
 
 async function preparaEnvio() {
   if (!confere()) return;
-  const p = montaPacote();
-  if (!p.jogadores.length && !p.esc) return toast('Você ainda não alterou nada.');
+  const modo = aba;
+  if (modo === 'escalacao' && !E.tit.some(Boolean)) return toast('Monte a escalação primeiro: toque nos lugares do campo.');
+  if (modo === 'jogadores' && !jogs.some((j) => !j.x)) return toast('Adicione os jogadores primeiro.');
+  const p = montaPacote(modo);
   abreSheet('<h3>Preparando…</h3>');
   const d = await fecha(p);
   const link = `${linkDoTime(T.slug)}#d=${d}`;
   const cabe = link.length <= LIMITE_LINK;
-  const arqs = await montaAnexos(cabe ? d : null);
+  const arqs = await montaAnexos(cabe ? d : null, modo);
   // com muitas fotos não cabe em link: as alterações vão num arquivo, junto com o resto
   if (!cabe) arqs.extra = [arquivoDosDados(d)];
-  const texto = cabe ? `Time ${T.name}: alterações para a transmissão da Copa Aranãs. Toque no link para abrir:\n${link}` : `Time ${T.name}: alterações para a transmissão da Copa Aranãs.`;
+  const assunto = `Time ${T.name}: ${modo === 'jogadores' ? 'lista de jogadores' : 'escalação'} para a transmissão da Copa Aranãs.`;
+  const texto = cabe ? `${assunto} Toque no link para abrir:\n${link}` : assunto;
   const n = p.esc ? p.esc.tit.filter((x) => x != null).length : 11;
   const topo = `<div class="resumo">${linhasResumo(p).map((l) => `<div>${esc(l)}</div>`).join('')}</div>
     ${n < 11 ? `<p class="aviso">⚠️ A escalação está com ${n} de 11: ela só entra na transmissão quando tiver os 11.</p>` : ''}`;
@@ -430,21 +442,47 @@ async function preparaEnvio() {
   await envia();
 }
 
-/* ⚙️ o que não é o dia a dia do treinador: copiar o link e enviar direto pro PC da transmissão */
+/* ⚙️ o que não é o dia a dia do treinador: lixeira, copiar o link e enviar direto pro PC da transmissão */
+function temErro() {
+  const rep = repetidos();
+  return jogs.some((j) => !j.x && (!numValido(j.num) || rep[Number(j.num)] > 1 || !j.nome.trim()));
+}
 async function abreEngrenagem() {
-  if (!confere()) return;
-  const p = montaPacote();
-  if (!p.jogadores.length && !p.esc) return toast('Você ainda não alterou nada.');
-  const d = await fecha(p);
-  const link = `${linkDoTime(T.slug)}#d=${d}`;
-  const f = formPc(d);
-  abreSheet(`<h3>Mais opções</h3>
-    <p class="muted" style="margin:0 0 12px">No mesmo Wi-Fi da transmissão, com o app ligado, envie direto para o sistema:</p>
-    ${f.html}
-    <div style="height:14px"></div>
-    <button class="grande sec" id="e-copia">🔗 Copiar link</button>`);
-  f.liga();
-  $('e-copia').onclick = () => (link.length <= LIMITE_LINK ? copia(link) : toast('Com essas fotos o link fica grande demais: use o botão verde, que envia como arquivo.'));
+  const qtd = jogs.filter((j) => j.x).length;
+  const lixo = `<button class="grande sec" id="g-lixo">🗑 Lixeira${qtd ? ` (${qtd})` : ''}</button>`;
+  if (temErro()) {
+    abreSheet(`<h3>Mais opções</h3>${lixo}<p class="aviso" style="margin:12px 0">Para enviar dados, corrija antes o que está em vermelho.</p><button class="grande sec" id="g-erro">Ver o que corrigir</button>`);
+    $('g-erro').onclick = () => { fechaSheet(); confere(); };
+  } else {
+    const d = await fecha(montaPacote('tudo'));
+    const link = `${linkDoTime(T.slug)}#d=${d}`;
+    const f = formPc(d);
+    abreSheet(`<h3>Mais opções</h3>
+      <p class="muted" style="margin:0 0 12px">No mesmo Wi-Fi da transmissão, com o app ligado, envie direto para o sistema:</p>
+      ${f.html}
+      <div style="height:14px"></div>
+      <button class="grande sec" id="e-copia">🔗 Copiar link</button>
+      ${lixo}`);
+    f.liga();
+    $('e-copia').onclick = () => (link.length <= LIMITE_LINK ? copia(link) : toast('Com essas fotos o link fica grande demais: use o botão verde, que envia como arquivo.'));
+  }
+  $('g-lixo').onclick = abreLixeira;
+}
+function abreLixeira() {
+  const lista = jogs.filter((j) => j.x);
+  abreSheet(`<h3>🗑 Lixeira</h3>
+    ${lista.length ? lista.map((j) => { const f = fotoDe(j); return `<div class="lix-item">${f ? `<img src="${esc(f)}" alt="">` : `<i class="sem">${esc(j.num)}</i>`}<span><b>${esc(j.num)}</b> · ${esc(j.nome)}</span><button data-volta="${esc(j.id)}">↩ Restaurar</button></div>`; }).join('') : '<p class="muted">A lixeira está vazia.</p>'}
+    <div style="height:12px"></div>
+    <button class="grande sec" id="l-volta">Voltar</button>`);
+  $('l-volta').onclick = abreEngrenagem;
+  $('sheet-box').querySelectorAll('[data-volta]').forEach((b) => { b.onclick = () => {
+    const j = porId(b.dataset.volta);
+    j.x = false;
+    if (j.o != null) j.rest = true;
+    guarda();
+    if (aba === 'jogadores') desenhaJogadores(); else desenhaEscalacao();
+    abreLixeira();
+  }; });
 }
 
 async function copia(txt) {
@@ -473,12 +511,12 @@ async function telaRecebido(d) {
   try { p = await abre(d); } catch { $('app').innerHTML = '<h1>Link incompleto</h1><p class="sub">Este link chegou cortado. Peça para enviar de novo.</p>'; return; }
   const f = formPc(d);
   const POS = Object.fromEntries(POSICOES);
-  $('app').innerHTML = `<h1>${esc(p.nome || p.slug)}</h1><p class="sub">O treinador enviou o time.</p>
+  $('app').innerHTML = `<h1>${esc(p.nome || p.slug)}</h1><p class="sub">O treinador enviou ${p.listaTitulo ? 'a escalação' : 'a lista de jogadores'}.</p>
     <div class="resumo">${linhasResumo(p).map((l) => `<div>${esc(l)}</div>`).join('')}</div>
     ${f.html}
     <p class="muted" style="font-size:14px">Precisa estar no mesmo Wi-Fi do PC da transmissão, com o app ligado.</p>
-    <h2>Lista completa (${(p.lista || []).length})</h2>
-    <div class="lista-completa">${(p.lista || []).map(([n, nome, pos]) => `<div><b>${esc(n)}</b><span>${esc(nome)}</span><small>${esc(POS[pos] || '')}</small></div>`).join('')}</div>`;
+    <h2>${esc(p.listaTitulo || 'Lista completa')} (${(p.lista || []).length})</h2>
+    <div class="lista-completa">${(p.lista || []).map(([n, nome, pos]) => `<div><b>${esc(n)}</b><span>${esc(nome)}</span><small>${esc(POS[pos] || pos || '')}</small></div>`).join('')}</div>`;
   f.liga();
 }
 

@@ -33,9 +33,12 @@ h1 { font-size: 24px; margin: 18px 0 2px; }
 .jog input { width: 100%; min-width: 0; height: 36px; background: var(--card2); border: 1px solid var(--line); border-radius: 9px; padding: 0 2px; text-align: center; font-weight: 800; }
 .jog input.ruim { border-color: var(--red); color: var(--red); }
 .jog textarea { display: block; width: 100%; min-height: 44px; resize: none; overflow: hidden; background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 10px; font: inherit; line-height: 1.25; color: inherit; field-sizing: content; }
-/* tirar do time: discreto e longe do número (e ainda pede confirmação) */
+/* excluir: discreto e longe do número (vai pra lixeira da engrenagem, dá pra trazer de volta) */
 .lixo { display: block; margin: 10px 0 0 auto; padding: 4px 2px; background: none; border: 0; font-size: 12px; color: var(--muted); }
-.grande.perigo { background: #a3262b; color: #fff; }
+.lix-item { display: flex; align-items: center; gap: 10px; border-top: 1px solid var(--line); padding: 8px 2px; }
+.lix-item img, .lix-item .sem { width: 42px; height: 42px; flex: none; border-radius: 50%; object-fit: cover; background: var(--card2); display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 14px; }
+.lix-item span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.lix-item button { flex: none; background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 9px 10px; font-size: 14px; font-weight: 700; }
 .lista-completa { margin-top: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 4px 12px; margin-bottom: 14px; }
 .lista-completa div { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 8px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 15px; }
 .lista-completa div:first-child { border-top: 0; }
@@ -45,9 +48,6 @@ h1 { font-size: 24px; margin: 18px 0 2px; }
 @media (max-width: 350px) { .pos { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .pos button { min-height: 36px; padding: 0; background: var(--card2); border: 1px solid var(--line); border-radius: 9px; font-size: 12px; font-weight: 700; color: var(--muted); }
 .pos button.on { background: var(--green); border-color: var(--green); color: #052; }
-.saiu { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--card); border: 1px dashed var(--line); border-radius: 14px; padding: 12px; margin-bottom: 10px; color: var(--muted); }
-.saiu button { flex: none; background: var(--card2); border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; font-weight: 700; color: var(--text); }
-.saiu span { min-width: 0; overflow-wrap: anywhere; }
 .novo { width: 100%; min-height: 56px; background: none; border: 2px dashed var(--green); border-radius: 14px; color: var(--green); font-weight: 800; margin-bottom: 10px; }
 
 /* escalação */

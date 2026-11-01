@@ -193,3 +193,92 @@ async function gerarImagemEscalacao(e) {
   for (const l of linhas) { y += 36; ctx.fillText(l, 60, y); }
   return new Promise((ok, ko) => cv.toBlob((b) => (b ? ok(b) : ko(new Error('imagem'))), 'image/png'));
 }
+
+/* ── imagem do elenco: foto, número, nome inteiro e posição de todos, em 2 colunas ── */
+/* e: { time, logo, jogadores: [{ number, nome, posicao, photo }] } */
+function quebraNome(ctx, nome, max) {
+  const linhas = [];
+  let atual = '';
+  for (const p of nome.split(' ')) {
+    const prova = atual ? `${atual} ${p}` : p;
+    if (atual && ctx.measureText(prova).width > max) { linhas.push(atual); atual = p; } else atual = prova;
+  }
+  if (atual) linhas.push(atual);
+  return linhas;
+}
+async function gerarImagemJogadores(e) {
+  const W = 1080, VERDE = '#33e02a', TOPO = 196, M = 40, GAP = 16, CW = (W - M * 2 - GAP) / 2, CH = 124;
+  const filas = Math.ceil(e.jogadores.length / 2);
+  const H = TOPO + filas * (CH + GAP) + 28;
+  const cv = document.createElement('canvas');
+  cv.width = W;
+  cv.height = H;
+  const ctx = cv.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#12341c');
+  g.addColorStop(1, '#040a06');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  const [logo, ...fotos] = await Promise.all([carregaImg(e.logo), ...e.jogadores.map((j) => carregaImg(j.photo))]);
+  if (logo) { const k = Math.min(130 / logo.width, 130 / logo.height); ctx.drawImage(logo, M + (130 - logo.width * k) / 2, 32 + (130 - logo.height * k) / 2, logo.width * k, logo.height * k); }
+  ctx.textAlign = 'left';
+  ctx.fillStyle = VERDE;
+  ctx.font = `700 32px ${FONTE_ARTE}`;
+  ctx.fillText('JOGADORES', 196, 68);
+  ctx.fillStyle = '#fff';
+  textoCabe(ctx, e.time.toUpperCase(), 196, 128, W - 236, 60, 900);
+  ctx.fillStyle = 'rgba(255,255,255,.75)';
+  ctx.font = `600 28px ${FONTE_ARTE}`;
+  ctx.fillText(`${e.jogadores.length} jogadores`, 196, 166);
+
+  e.jogadores.forEach((j, i) => {
+    const x = M + (i % 2) * (CW + GAP), y = TOPO + Math.floor(i / 2) * (CH + GAP);
+    ctx.fillStyle = 'rgba(255,255,255,.07)';
+    caminhoRedondo(ctx, x, y, CW, CH, 16);
+    ctx.fill();
+    const R = 46, cx = x + 16 + R, cy = y + CH / 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.fillStyle = '#0b1117';
+    ctx.fill();
+    ctx.clip();
+    const f = fotos[i];
+    if (f) {
+      const k = Math.max((2 * R) / f.width, (2 * R) / f.height);
+      ctx.drawImage(f, cx - (f.width * k) / 2, cy - R, f.width * k, f.height * k);
+    }
+    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.strokeStyle = VERDE;
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    // número em destaque, no canto da foto
+    ctx.beginPath();
+    ctx.arc(cx + R * 0.72, cy - R * 0.68, 22, 0, Math.PI * 2);
+    ctx.fillStyle = VERDE;
+    ctx.fill();
+    ctx.fillStyle = '#041004';
+    ctx.textAlign = 'center';
+    ctx.font = `900 ${String(j.number).length > 2 ? 18 : 23}px ${FONTE_ARTE}`;
+    ctx.fillText(String(j.number), cx + R * 0.72, cy - R * 0.68 + 8);
+    // nome inteiro: diminui a letra até caber em 2 linhas
+    ctx.textAlign = 'left';
+    const tx = cx + R + 22, max = x + CW - 14 - tx;
+    let tam = 28, linhas;
+    do { ctx.font = `800 ${tam}px ${FONTE_ARTE}`; linhas = quebraNome(ctx, j.nome, max); tam -= 2; } while ((linhas.length > 2 || linhas.some((l) => ctx.measureText(l).width > max)) && tam > 16);
+    tam += 2;
+    const alt = tam + 5, total = linhas.length * alt + (j.posicao ? 30 : 0);
+    let ty = cy - total / 2 + tam - 3;
+    ctx.fillStyle = '#fff';
+    for (const l of linhas) { ctx.fillText(l, tx, ty); ty += alt; }
+    if (j.posicao) {
+      ctx.fillStyle = VERDE;
+      ctx.font = `700 23px ${FONTE_ARTE}`;
+      ctx.fillText(j.posicao, tx, ty + 3);
+    }
+  });
+  return new Promise((ok, ko) => cv.toBlob((b) => (b ? ok(b) : ko(new Error('imagem'))), 'image/png'));
+}
