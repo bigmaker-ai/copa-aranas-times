@@ -1,6 +1,9 @@
-/* SITE DOS TIMES · Copa Aranãs: página estática (GitHub Pages), sem servidor e sem conta.
- * As alterações viajam DENTRO do link que o treinador manda no WhatsApp (#d=…); quem aplica no sistema é
- * a página /receber-time do PC da transmissão, aberta pelo botão 📡 (o site é https e não enxerga o PC na rede). */
+/* SITE DOS TIMES · Copa Aranãs: página estática (GitHub Pages) + banco na Cloudflare (site-times/worker).
+ * Cada time tem um link com código: quem tem o link vê e altera. Tudo salva sozinho, por jogador.
+ * Pra transmissão, o botão 📡 abre a página /receber-time do PC com tudo no endereço (o site é https e não
+ * enxerga o PC na rede); o link longo no WhatsApp também leva tudo, então o PC não depende do banco. */
+const API = /^(127\.0\.0\.1|localhost)$/.test(location.hostname) ? 'http://127.0.0.1:8787' : 'https://copa-times.copa-aranas-times-api.workers.dev';
+const CODIGO = new URLSearchParams(location.search).get('c') || '';
 const POSICOES = [['GK', 'Goleiro'], ['LT', 'Lateral'], ['DF', 'Defesa'], ['MF', 'Meio'], ['FW', 'Ataque']];
 const FORMACOES = ['4-3-3', '4-2-3-1', '4-4-2', '4-1-4-1', '3-5-2', '3-4-3', '5-3-2', '4-2-2-2'];
 /* acima disso não vai como link: vai como arquivo (o texto longo demais pode não abrir no WhatsApp) */
@@ -12,7 +15,7 @@ const esc = (t) => String(t ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<
 const ler = (k) => { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } };
 const grava = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } };
 const baseUrl = () => location.origin + location.pathname;
-const linkDoTime = (slug) => `${baseUrl()}?time=${slug}`;
+const linkDoTime = (slug, c = CODIGO) => `${baseUrl()}?time=${slug}${c ? `&c=${c}` : ''}`;
 
 function toast(txt, bom) {
   const t = $('toast');
@@ -81,14 +84,99 @@ function mudouCampos(j) {
   return String(j.num).trim() !== String(j.num0) || j.nome.trim().toUpperCase() !== j.nome0.toUpperCase() || j.pos !== j.pos0;
 }
 const mexido = (j) => j.o == null || j.x || !!j.f || mudouCampos(j);
+/* ── salvar: o que mudou vai pro banco ~1 s depois; o que não foi fica neste celular até conseguir ── */
+const registro = (j) => ({ num: String(j.num), nome: j.nome, pos: j.pos, f: j.f, x: !!j.x, rest: !!j.rest, novo: j.o == null });
+let noBanco = new Map(), escNoBanco = '', ultimoAt = 0, timerSalva = null, salvando = false, deNovo = false, estadoSalvo = 'salvo';
+const chavePend = () => `${chave}.pend`;
+function sujos() {
+  const jogadores = jogs.filter((j) => JSON.stringify(registro(j)) !== noBanco.get(j.id)).map((j) => ({ id: j.id, dados: registro(j) }));
+  const esc = JSON.stringify(E) !== escNoBanco ? E : null;
+  return { jogadores, esc };
+}
+function mostraEstado(e) {
+  estadoSalvo = e;
+  const el = $('estado-salvo');
+  if (el) el.textContent = { salvo: '✔ Tudo salvo', salvando: 'Salvando…', sem: '⚠️ Sem internet: guardado neste celular' }[e];
+}
 function guarda() {
-  const ed = {}, novos = [];
-  for (const j of jogs) {
-    if (j.o == null) novos.push({ id: j.id, num: j.num, nome: j.nome, pos: j.pos, f: j.f, x: j.x });
-    else if (mexido(j) || j.rest) ed[j.o] = { num: j.num, nome: j.nome, pos: j.pos, f: j.f, x: j.x, rest: j.rest };
+  pronto = null;
+  vezPreparo++;
+  const d = sujos();
+  grava(chavePend(), d);
+  mostraEstado('salvando');
+  clearTimeout(timerSalva);
+  timerSalva = setTimeout(salvaAgora, 900);
+}
+/* responde se está tudo no banco */
+async function salvaAgora(keepalive) {
+  clearTimeout(timerSalva);
+  if (salvando) { deNovo = true; return false; }
+  const d = sujos();
+  if (!d.jogadores.length && !d.esc) { grava(chavePend(), null); mostraEstado('salvo'); return true; }
+  salvando = true;
+  mostraEstado('salvando');
+  const textos = new Map(d.jogadores.map((x) => [x.id, JSON.stringify(x.dados)]));
+  const textoEsc = d.esc ? JSON.stringify(d.esc) : null;
+  let ok = false;
+  try {
+    const r = await fetch(`${API}/t/${T.slug}/salvar`, { method: 'POST', keepalive: !!keepalive, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ c: CODIGO, ...d }) });
+    ok = r.ok && (await r.json()).ok;
+  } catch { /* sem internet */ }
+  salvando = false;
+  if (ok) {
+    for (const [id, t] of textos) noBanco.set(id, t);
+    if (textoEsc) escNoBanco = textoEsc;
+    const resto = sujos();
+    grava(chavePend(), resto.jogadores.length || resto.esc ? resto : null);
+    if (deNovo || resto.jogadores.length || resto.esc) { deNovo = false; return salvaAgora(); }
+    mostraEstado('salvo');
+    return true;
   }
-  if (!grava(chave, { ed, novos, esc: E })) toast('Sem espaço para guardar neste celular: envie logo o que já fez.');
-  agendaPreparo();
+  deNovo = false;
+  grava(chavePend(), sujos());
+  mostraEstado('sem');
+  timerSalva = setTimeout(salvaAgora, 15000);
+  return false;
+}
+async function botaoSalvar() {
+  const ok = await salvaAgora();
+  if (!ok && estadoSalvo === 'sem') return toast('Sem internet: ficou guardado neste celular e sobe sozinho quando a internet voltar.');
+  toast(temErro() ? '✔ Salvo. Só falta corrigir o que está em vermelho.' : '✔ Salvo', !temErro());
+}
+function aplicaRegistro(id, dados) {
+  let j = porId(id);
+  if (!j) {
+    j = { id, o: null, foto: '', num: '', nome: '', pos: '', f: '', x: false };
+    jogs.push(j);
+  }
+  Object.assign(j, { num: dados.num ?? j.num, nome: dados.nome ?? j.nome, pos: dados.pos ?? j.pos, f: dados.f || '', x: !!dados.x, rest: !!dados.rest });
+}
+/* o que outra pessoa salvou aparece aqui, sem atrapalhar quem está digitando */
+let redesenhaDepois = false;
+function redesenha() {
+  const digitando = document.activeElement?.matches?.('input, textarea');
+  if (digitando || !$('sheet').hidden) { redesenhaDepois = true; return; }
+  redesenhaDepois = false;
+  if (aba === 'jogadores') desenhaJogadores(); else desenhaEscalacao();
+}
+async function buscaNovidades() {
+  if (document.hidden || !T) return;
+  let r;
+  try { r = await fetch(`${API}/t/${T.slug}?c=${encodeURIComponent(CODIGO)}&desde=${ultimoAt}`).then((x) => x.json()); } catch { return; }
+  if (!r.ok) return;
+  ultimoAt = r.agora;
+  const pend = sujos();
+  const meus = new Set(pend.jogadores.map((x) => x.id));
+  let mudou = false;
+  for (const l of r.jogadores) {
+    const t = JSON.stringify(l.dados);
+    if (meus.has(l.id) || noBanco.get(l.id) === t) continue;
+    aplicaRegistro(l.id, l.dados);
+    noBanco.set(l.id, JSON.stringify(registro(porId(l.id))));
+    mudou = true;
+  }
+  if (r.esc && !pend.esc && JSON.stringify(r.esc) !== escNoBanco) { E = r.esc; limpaEsc(); escNoBanco = JSON.stringify(E); mudou = true; }
+  if (mudou) { pronto = null; vezPreparo++; redesenha(); } else if (redesenhaDepois) redesenha();
 }
 const porId = (id) => jogs.find((j) => j.id === id);
 const fotoDe = (j) => j.f || j.foto;
@@ -111,9 +199,10 @@ function desenhaTime() {
       </div>
     </div>
     <div id="corpo"></div>
-    <div class="rodape"><button class="grande" id="enviar">✅ Enviar ${aba === 'jogadores' ? 'jogadores' : 'escalação'} por WhatsApp</button></div>`;
-  document.querySelectorAll('[data-aba]').forEach((b) => { b.onclick = () => { aba = b.dataset.aba; desenhaTime(); scrollTo(0, 0); agendaPreparo(); }; });
-  $('enviar').onclick = preparaEnvio;
+    <div class="rodape"><p class="estado-salvo" id="estado-salvo"></p><button class="grande" id="salvar">💾 Salvar</button></div>`;
+  document.querySelectorAll('[data-aba]').forEach((b) => { b.onclick = () => { aba = b.dataset.aba; pronto = null; vezPreparo++; desenhaTime(); scrollTo(0, 0); }; });
+  $('salvar').onclick = botaoSalvar;
+  mostraEstado(estadoSalvo);
   $('eng').onclick = abreEngrenagem;
   if (aba === 'jogadores') desenhaJogadores(); else desenhaEscalacao();
 }
@@ -142,7 +231,7 @@ function desenhaJogadores() {
   const ordem = jogs.filter((j) => j.o != null && !j.x).sort((a, b) => a.num0 - b.num0);
   const novos = jogs.filter((j) => j.o == null && !j.x);
   $('corpo').innerHTML = `
-    <p class="dica">Corrija o que estiver errado. Toque na foto para trocar. O que você não mexer continua igual.</p>
+    <p class="dica">Corrija o que estiver errado. Toque na foto para trocar. Tudo salva sozinho.</p>
     <button class="novo" id="novo">＋ Adicionar jogador</button>
     ${novos.slice().reverse().map((j) => cardJogador(j, rep)).join('')}
     ${ordem.map((j) => cardJogador(j, rep)).join('')}`;
@@ -416,7 +505,7 @@ async function mandaLink(link) {
  * vier direto do toque. Sem isso, teria que pedir um segundo toque. */
 let pronto = null, vezPreparo = 0, timerPreparo = null;
 const podeEnviar = (modo) => !temErro() && (modo === 'escalacao' ? E.tit.some(Boolean) : jogs.some((j) => !j.x));
-function agendaPreparo() {
+function agendaPreparo(espera = 1200) {
   pronto = null;
   vezPreparo++;
   clearTimeout(timerPreparo);
@@ -425,7 +514,7 @@ function agendaPreparo() {
     if (!podeEnviar(modo)) return;
     const e = await montaEnvio(modo);
     if (vez === vezPreparo) pronto = e;
-  }, 1200);
+  }, espera);
 }
 async function montaEnvio(modo) {
   const p = montaPacote(modo);
@@ -494,24 +583,53 @@ function temErro() {
   const rep = repetidos();
   return jogs.some((j) => !j.x && (!numValido(j.num) || rep[Number(j.num)] > 1 || !j.nome.trim()));
 }
-async function abreEngrenagem() {
+/* a senha é conferida no banco; neste aparelho vale até fechar o navegador */
+let senhaAdm = (() => { try { return sessionStorage.getItem('copa.adm') || ''; } catch { return ''; } })();
+function pedeSenha(depois, aoFechar) {
+  abreSheet(`<h3>🔒 Digite a senha</h3>
+    <form id="f-senha"><input class="tec" id="senha" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Senha" aria-label="Senha">
+    <div style="height:10px"></div><button class="grande" type="submit">Entrar</button></form>
+    <p class="aviso" id="senha-erro" style="margin:10px 0 0" hidden></p>`);
+  $('senha').focus();
+  $('f-senha').onsubmit = async (e) => {
+    e.preventDefault();
+    const senha = $('senha').value.normalize('NFC');
+    let r;
+    try { r = await fetch(`${API}/admin/ok`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ senha }) }).then((x) => x.json()); }
+    catch { r = { ok: false, error: 'sem internet: não deu para conferir a senha' }; }
+    if (!r.ok) { $('senha-erro').textContent = r.error || 'senha errada'; $('senha-erro').hidden = false; return; }
+    senhaAdm = senha;
+    try { sessionStorage.setItem('copa.adm', senha); } catch { /* só não lembra */ }
+    depois();
+  };
+}
+function abreEngrenagem() {
+  if (!senhaAdm) return pedeSenha(abreEngrenagem);
+  mostraEngrenagem();
+}
+async function mostraEngrenagem() {
   const qtd = jogs.filter((j) => j.x).length;
   const lixo = `<button class="grande sec" id="g-lixo">🗑 Lixeira${qtd ? ` (${qtd})` : ''}</button>`;
   if (temErro()) {
-    abreSheet(`<h3>Mais opções</h3>${lixo}<p class="aviso" style="margin:12px 0">Para enviar dados, corrija antes o que está em vermelho.</p><button class="grande sec" id="g-erro">Ver o que corrigir</button>`);
+    abreSheet(`<h3>Mais opções</h3>${lixo}<p class="aviso" style="margin:12px 0">Para enviar, corrija antes o que está em vermelho.</p><button class="grande sec" id="g-erro">Ver o que corrigir</button>`);
     $('g-erro').onclick = () => { fechaSheet(); confere(); };
   } else {
     const d = await fecha(montaPacote('tudo'));
     const link = `${linkDoTime(T.slug)}#d=${d}`;
     const f = formPc(d);
     abreSheet(`<h3>Mais opções</h3>
-      <p class="muted" style="margin:0 0 12px">No mesmo Wi-Fi da transmissão, com o app ligado, envie direto para o sistema:</p>
+      <button class="grande" id="g-zap">📲 Enviar ${aba === 'jogadores' ? 'jogadores' : 'escalação'} por WhatsApp</button>
+      <button class="grande sec" id="g-time">🔗 Copiar link deste time</button>
+      <p class="muted" style="margin:16px 0 8px">No mesmo Wi-Fi da transmissão, com o app ligado:</p>
       ${f.html}
       <div style="height:14px"></div>
-      <button class="grande sec" id="e-copia">🔗 Copiar link</button>
+      <button class="grande sec" id="e-copia">🔗 Copiar link com os dados</button>
       ${lixo}`);
     f.liga();
-    $('e-copia').onclick = () => (link.length <= LIMITE_LINK ? copia(link) : toast('Com essas fotos o link fica grande demais: use o botão verde, que envia como arquivo.'));
+    $('g-zap').onclick = preparaEnvio;
+    $('g-time').onclick = () => copia(linkDoTime(T.slug));
+    $('e-copia').onclick = () => (link.length <= LIMITE_LINK ? copia(link) : toast('Com essas fotos o link fica grande demais: use o WhatsApp, que envia como arquivo.'));
+    if (podeEnviar(aba)) agendaPreparo(0);
   }
   $('g-lixo').onclick = abreLixeira;
 }
@@ -521,7 +639,7 @@ function abreLixeira() {
     ${lista.length ? lista.map((j) => { const f = fotoDe(j); return `<div class="lix-item">${f ? `<img src="${esc(f)}" alt="">` : `<i class="sem">${esc(j.num)}</i>`}<span><b>${esc(j.num)}</b> · ${esc(j.nome)}</span><button data-volta="${esc(j.id)}">↩ Restaurar</button></div>`; }).join('') : '<p class="muted">A lixeira está vazia.</p>'}
     <div style="height:12px"></div>
     <button class="grande sec" id="l-volta">Voltar</button>`);
-  $('l-volta').onclick = abreEngrenagem;
+  $('l-volta').onclick = mostraEngrenagem;
   $('sheet-box').querySelectorAll('[data-volta]').forEach((b) => { b.onclick = () => {
     const j = porId(b.dataset.volta);
     j.x = false;
@@ -568,15 +686,25 @@ async function telaRecebido(d) {
 }
 
 /* ═══ lista de times ═══ */
-async function telaInicio() {
+function telaInicio() {
+  $('app').innerHTML = '<h1>Times da Copa Aranãs</h1><p class="sub">Área do organizador.</p><button class="grande" id="entrar">🔒 Entrar</button>';
+  $('entrar').onclick = () => pedeSenha(listaTimes);
+  if (senhaAdm) listaTimes();
+}
+async function listaTimes() {
+  fechaSheet();
   const times = await fetch('times.json').then((r) => r.json());
+  let r;
+  try { r = await fetch(`${API}/admin/codigos`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ senha: senhaAdm, slugs: times.map((t) => t.slug) }) }).then((x) => x.json()); }
+  catch { return toast('Sem internet: não deu para abrir a lista.'); }
+  if (!r.ok) { senhaAdm = ''; try { sessionStorage.removeItem('copa.adm'); } catch { /* */ } return toast(r.error || 'senha errada'); }
   $('app').innerHTML = `<h1>Times da Copa Aranãs</h1><p class="sub">Escolha o time e mande o link dele para o treinador.</p>
     <button class="grande sec" id="abrir-arq" style="margin-bottom:14px">📂 Abrir arquivo recebido</button>
-    ${times.map((t) => `<div class="cartao"><a href="?time=${esc(t.slug)}"><img src="${esc(t.logo)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span><b>${esc(t.name)}</b><small>${t.jogadores} jogadores</small></span></a><button data-link="${esc(t.slug)}" data-nome="${esc(t.name)}">📲 Mandar link</button></div>`).join('')}`;
+    ${times.map((t) => `<div class="cartao"><a href="${esc(linkDoTime(t.slug, r.codigos[t.slug]))}"><img src="${esc(t.logo)}" alt="" loading="lazy" onerror="this.style.visibility='hidden'"><span><b>${esc(t.name)}</b><small>${t.jogadores} jogadores</small></span></a><button data-link="${esc(t.slug)}" data-nome="${esc(t.name)}">📲 Mandar link</button></div>`).join('')}`;
   $('abrir-arq').onclick = () => $('in-arquivo').click();
   document.querySelectorAll('[data-link]').forEach((b) => { b.onclick = async () => {
-    const link = linkDoTime(b.dataset.link);
-    const texto = `Treinador do ${b.dataset.nome}: confira os jogadores e a escalação, corrija o que precisar e me mande de volta. É só tocar no botão verde no final.\n${link}`;
+    const link = linkDoTime(b.dataset.link, r.codigos[b.dataset.link]);
+    const texto = `Treinador do ${b.dataset.nome}: confira os jogadores e a escalação e corrija o que precisar. Tudo salva sozinho.\n${link}`;
     if (navigator.share) { try { await navigator.share({ text: texto }); return; } catch (e) { if (e?.name === 'AbortError') return; } }
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank');
   }; });
@@ -601,7 +729,31 @@ $('in-arquivo').addEventListener('change', async (e) => {
   } catch { $('app').innerHTML = '<h1>Time não encontrado</h1><p class="sub">Confira o link que você recebeu.</p>'; return; }
   chave = `copa.time.${T.slug}`;
   document.title = `${T.name} · Copa Aranãs`;
-  montaEstado(ler(chave));
+  const invalido = () => { $('app').innerHTML = '<h1>Link incompleto</h1><p class="sub">Peça o link deste time para o organizador da Copa.</p>'; };
+  if (!CODIGO) return invalido();
+  let r = null;
+  try {
+    const x = await fetch(`${API}/t/${T.slug}?c=${encodeURIComponent(CODIGO)}`);
+    if (x.status === 403) return invalido();
+    r = await x.json();
+    grava(`${chave}.banco`, r);
+  } catch {
+    r = ler(`${chave}.banco`);
+    estadoSalvo = 'sem';
+  }
+  const ed = {}, novos = [];
+  for (const l of r?.jogadores || []) { if (l.dados.novo) novos.push({ id: l.id, ...l.dados }); else ed[l.id] = l.dados; }
+  montaEstado({ ed, novos, esc: r?.esc });
+  noBanco = new Map(jogs.map((j) => [j.id, JSON.stringify(registro(j))]));
+  escNoBanco = JSON.stringify(E);
+  ultimoAt = r?.agora || 0;
+  // o que ficou neste celular sem subir
+  const pend = ler(chavePend());
+  for (const x of pend?.jogadores || []) aplicaRegistro(x.id, x.dados);
+  if (pend?.esc) E = pend.esc;
+  limpaEsc();
   desenhaTime();
-  agendaPreparo();
+  if (pend) salvaAgora();
+  setInterval(buscaNovidades, 30000);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) salvaAgora(true); else buscaNovidades(); });
 })();
