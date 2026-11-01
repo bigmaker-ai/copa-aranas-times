@@ -124,12 +124,12 @@ function cardJogador(j, rep) {
       <button class="foto" data-foto="${esc(j.id)}" aria-label="Trocar foto">${f ? `<img src="${esc(f)}" alt="" loading="lazy">` : '📷'}<small>foto</small></button>
       <div class="linha">
         <input class="num ${ruim ? 'ruim' : ''}" data-num="${esc(j.id)}" value="${esc(j.num)}" inputmode="numeric" maxlength="3" placeholder="Nº" aria-label="Número">
-        <button class="lixo" data-tira="${esc(j.id)}" aria-label="Tirar do time">🗑</button>
       </div>
     </div>
     <div>
       <textarea data-nome="${esc(j.id)}" rows="1" maxlength="40" placeholder="Nome do jogador" aria-label="Nome">${esc(j.nome)}</textarea>
       <div class="pos">${POSICOES.map(([v, t]) => `<button data-pos="${esc(j.id)}" data-v="${v}" class="${j.pos === v ? 'on' : ''}">${t}</button>`).join('')}</div>
+      <button class="lixo" data-tira="${esc(j.id)}">🗑 tirar do time</button>
     </div>
   </div>`;
 }
@@ -162,13 +162,21 @@ function desenhaJogadores() {
     marcaErros();
   }; });
   c.querySelectorAll('[data-foto]').forEach((b) => { b.onclick = () => pedeFoto(porId(b.dataset.foto)); });
-  c.querySelectorAll('[data-tira]').forEach((b) => { b.onclick = () => {
-    const j = porId(b.dataset.tira);
-    if (j.o == null) jogs = jogs.filter((x) => x !== j); else j.x = true;
-    limpaEsc(); guarda(); desenhaJogadores();
-  }; });
+  c.querySelectorAll('[data-tira]').forEach((b) => { b.onclick = () => confirmaTirar(porId(b.dataset.tira)); });
   c.querySelectorAll('[data-desfaz]').forEach((b) => { b.onclick = () => { porId(b.dataset.desfaz).x = false; guarda(); desenhaJogadores(); }; });
 }
+/* esbarrar não tira ninguém: o botão principal é o de manter */
+function confirmaTirar(j) {
+  abreSheet(`<h3>Tirar ${esc(j.nome.trim() || 'este jogador')} do time?</h3>
+    <button class="grande" id="tira-nao">Não, manter</button>
+    <button class="grande perigo" id="tira-sim">Sim, tirar do time</button>`);
+  $('tira-nao').onclick = fechaSheet;
+  $('tira-sim').onclick = () => {
+    if (j.o == null) jogs = jogs.filter((x) => x !== j); else j.x = true;
+    limpaEsc(); guarda(); fechaSheet(); desenhaJogadores();
+  };
+}
+
 /* o nome aparece inteiro, em quantas linhas precisar */
 function ajustaAltura(t) { t.style.height = 'auto'; t.style.height = `${t.scrollHeight + 2}px`; }
 addEventListener('resize', () => document.querySelectorAll('[data-nome]').forEach(ajustaAltura));
@@ -289,7 +297,8 @@ function montaPacote() {
     jogadores.push(p);
   }
   const n = E.tit.filter(Boolean).length;
-  const pac = { v: 1, slug: T.slug, nome: T.name, t: Date.now(), jogadores };
+  const lista = jogs.filter((j) => !j.x).sort((a, b) => Number(a.num) - Number(b.num)).map((j) => [Number(j.num), j.nome.trim().toUpperCase(), j.pos]);
+  const pac = { v: 1, slug: T.slug, nome: T.name, t: Date.now(), jogadores, lista };
   if (n) pac.esc = { form: E.form, tit: E.tit.map((id) => (id ? Number(porId(id).num) : null)), res: E.res.map((id) => Number(porId(id).num)), tec: E.tec.trim() };
   return pac;
 }
@@ -319,13 +328,11 @@ function linhasResumo(p) {
 const nomeArquivo = (t) => t.replace(/[\\/:*?"<>|]/g, '').trim();
 const POS_NOME = { GK: 'Goleiro', DF: 'Defesa', MF: 'Meio-campo', FW: 'Ataque' };
 function abasDaPlanilha() {
-  const situacao = (j) => (j.x ? 'Saiu do time' : E.tit.includes(j.id) ? 'Titular' : E.res.includes(j.id) ? 'Reserva' : '');
-  const alteracao = (j) => (j.x ? 'Tirado' : j.o == null ? 'Novo' : [mudouCampos(j) ? 'Corrigido' : '', j.f ? 'Foto nova' : ''].filter(Boolean).join(' + '));
   const celNum = (j) => (numValido(j.num) ? Number(j.num) : j.num);
-  const lista = jogs.slice().sort((a, b) => Number(a.x) - Number(b.x) || Number(a.num) - Number(b.num));
+  const lista = jogs.filter((j) => !j.x).sort((a, b) => Number(a.num) - Number(b.num));
   const abas = [{
-    nome: 'Elenco', larguras: [7, 42, 14, 14, 20], titulos: [0],
-    linhas: [['Nº', 'Nome', 'Posição', 'Situação', 'Alteração'], ...lista.map((j) => [celNum(j), j.nome.trim().toUpperCase(), POS_NOME[j.pos] || '', situacao(j), alteracao(j)])],
+    nome: 'Elenco', larguras: [7, 42, 14], titulos: [0],
+    linhas: [['Nº', 'Nome', 'Posição'], ...lista.map((j) => [celNum(j), j.nome.trim().toUpperCase(), POS_NOME[j.pos] || ''])],
   }];
   if (E.tit.some(Boolean)) {
     const lin = (j, f) => [f, celNum(j), j.nome.trim().toUpperCase(), POS_NOME[j.pos] || ''];
@@ -461,15 +468,13 @@ async function telaRecebido(d) {
   let p;
   try { p = await abre(d); } catch { $('app').innerHTML = '<h1>Link incompleto</h1><p class="sub">Este link chegou cortado. Peça para enviar de novo.</p>'; return; }
   const f = formPc(d);
-  const js = p.jogadores || [];
-  const titulo = (j) => (j.o ? (j.o.split('|')[1] || j.nome || '') : j.nome);
   const POS = Object.fromEntries(POSICOES);
-  const det = (j) => (j.x ? 'sai do time' : [j.num !== undefined ? `nº ${j.num}` : '', j.o && j.nome ? `nome: ${j.nome}` : '', j.pos ? POS[j.pos] || j.pos : '', j.f ? 'foto nova' : ''].filter(Boolean).join(' · '));
-  $('app').innerHTML = `<h1>${esc(p.nome || p.slug)}</h1><p class="sub">O treinador enviou estas alterações.</p>
+  $('app').innerHTML = `<h1>${esc(p.nome || p.slug)}</h1><p class="sub">O treinador enviou o time.</p>
     <div class="resumo">${linhasResumo(p).map((l) => `<div>${esc(l)}</div>`).join('')}</div>
-    ${js.map((j) => `<div class="op">${j.f ? `<img src="${esc(j.f)}" alt="">` : `<span class="sem">${j.x ? '🗑' : j.o ? '✏️' : '＋'}</span>`}<span><b>${esc(titulo(j))}</b><small>${esc(det(j))}</small></span></div>`).join('')}
-    <div style="height:18px"></div>${f.html}
-    <p class="muted" style="font-size:14px">Precisa estar no mesmo Wi-Fi do PC da transmissão, com o app ligado.</p>`;
+    ${f.html}
+    <p class="muted" style="font-size:14px">Precisa estar no mesmo Wi-Fi do PC da transmissão, com o app ligado.</p>
+    <h2>Lista completa (${(p.lista || []).length})</h2>
+    <div class="lista-completa">${(p.lista || []).map(([n, nome, pos]) => `<div><b>${esc(n)}</b><span>${esc(nome)}</span><small>${esc(POS[pos] || '')}</small></div>`).join('')}</div>`;
   f.liga();
 }
 
