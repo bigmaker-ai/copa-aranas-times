@@ -271,7 +271,7 @@ function escolheLugar(i) {
     return `<button class="op" data-esc="${esc(j.id)}">${f ? `<img src="${esc(f)}" alt="" loading="lazy">` : `<span class="sem">${esc(j.num)}</span>`}<span><b>${esc(j.num)} · ${esc(j.nome)}</b>${em ? '<small>já está no campo: troca de lugar</small>' : ''}</span></button>`; };
   abreSheet(`<h3>${esc(POS_NOME[pos])}: quem joga aqui?</h3>
     ${atual ? '<button class="grande sec" id="vazio" style="margin-bottom:10px">Deixar este lugar vazio</button>' : ''}
-    ${daPosicao.length ? `<h2>${esc(POS_NOME[pos])}</h2>${daPosicao.map(item).join('')}` : ''}
+    ${daPosicao.length ? `<h2>${esc(POS_NOME[pos])}</h2>${daPosicao.map(item).join('')}` : `<p class="aviso" id="sem-pos">Nenhum jogador marcado como ${esc(POS_NOME[pos])}. Marque na aba Jogadores que ele aparece primeiro aqui.</p>`}
     ${outros.length ? `<h2>${daPosicao.length ? 'Os outros, por número' : 'Todos, por número'}</h2>${outros.map(item).join('')}` : ''}`);
   if (atual) $('vazio').onclick = () => { E.tit[i] = null; guarda(); fechaSheet(); desenhaEscalacao(); };
   $('sheet-box').querySelectorAll('[data-esc]').forEach((b) => { b.onclick = () => {
